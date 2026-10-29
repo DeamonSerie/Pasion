@@ -256,6 +256,35 @@ The value factor is bounded such that $0 \leq V \leq 1$ under normal conditions,
 \label{fig:valuefactor}
 \end{figure}
 
+\section{Depositor Withdrawal}
+\subsection{Overview}
+A depositor may withdraw the principal and accrued interest from a debt instrument before all associated loans are settled. The withdrawal mints the total withdrawn amount to the depositor in the instrument's loaned currency and triggers adjustments to affected loans, tracking of withdrawn funds, and, when loans remain unpaid, bounty creation.
+
+\subsection{Withdrawal Execution}
+Upon withdrawal, the protocol:
+\begin{enumerate}
+\item Verifies the instrument is active and has not already been withdrawn.
+\item Mints principal plus accrued interest to the depositor.
+\item Records a withdrawal entry with affected loan references.
+\item Marks the instrument as having executed a withdrawal.
+\item Tracks the withdrawn funds as held.
+\end{enumerate}
+
+\subsection{Affected Loan Adjustment}
+All loans affected by the withdrawal have their obligations discounted to forty percent of the original obligation. The discounted obligation remains payable by the loaner, while the instrument's debt history records each adjustment. This discount reflects the reduced collateral backing after withdrawal.
+
+\subsection{Withdrawn Funds Tracking and Loss}
+Withdrawn funds are tracked by withdrawal and may transition through held, transferred, lost, settled, or recovered states. If all tracked funds for a withdrawal are lost:
+\begin{itemize}
+\item Loaners who paid at the start receive refunds of their paid amounts.
+\item Affected loan obligations are released or marked refunded.
+\item Adjusted obligations are set to zero.
+\end{itemize}
+This ensures that lost withdrawn value does not remain an unbounded liability against loaners.
+
+\subsection{Bounty Hook}
+If unpaid affected loans remain after withdrawal, a bounty is created from the withdrawn value, as described in the Bounty System section. The bounty auctions the withdrawn value and either settles it to a bidder or distributes and burns it.
+
 \section{Bounty System}
 \subsection{Overview}
 A bounty is created when a depositor withdraws from a debt instrument while affected loans remain unpaid. The bounty represents the withdrawn minted value and is auctioned on-chain in the instrument's loaned currency. If a bidder wins, the winner receives the bounty currency and pays PAI to the reward wallet. If no bids arrive by expiry, a portion of the value is distributed as PAI to all wallets and the remainder is burned over time.
