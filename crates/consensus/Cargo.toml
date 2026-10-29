@@ -1,0 +1,12 @@
+[package]
+name = "pasion-consensus"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+bincode = { workspace = true }
+blake3 = { workspace = true }

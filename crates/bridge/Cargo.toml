@@ -1,0 +1,11 @@
+[package]
+name = "pasion-bridge"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+blake3 = { workspace = true }

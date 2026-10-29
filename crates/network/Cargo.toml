@@ -1,0 +1,11 @@
+[package]
+name = "pasion-network"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+serde = { workspace = true }
+libp2p = { workspace = true }
+tokio = { workspace = true }

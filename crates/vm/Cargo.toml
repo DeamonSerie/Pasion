@@ -1,0 +1,16 @@
+[package]
+name = "pasion-vm"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+pasion-ledger = { path = "../ledger" }
+openvm = { workspace = true }
+openvm-sdk = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+blake3 = { workspace = true }
+bincode = { workspace = true }
+hex = { workspace = true }

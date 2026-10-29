@@ -1,0 +1,9 @@
+[package]
+name = "pasion-lending"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+serde = { workspace = true }

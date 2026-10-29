@@ -1,0 +1,29 @@
+[package]
+name = "pasion-node"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "pasion-node"
+path = "src/main.rs"
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+pasion-consensus = { path = "../consensus" }
+pasion-ledger = { path = "../ledger" }
+pasion-assets = { path = "../assets" }
+pasion-debt-nft = { path = "../debt-nft" }
+pasion-liquidation = { path = "../liquidation" }
+pasion-vm = { path = "../vm" }
+pasion-bridge = { path = "../bridge" }
+pasion-network = { path = "../network" }
+pasion-rpc = { path = "../rpc" }
+pasion-storage = { path = "../storage" }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+tracing-subscriber = "0.3"
+blake3 = { workspace = true }
+bincode = { workspace = true }

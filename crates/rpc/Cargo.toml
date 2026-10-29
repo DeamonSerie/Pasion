@@ -1,0 +1,14 @@
+[package]
+name = "pasion-rpc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+pasion-ledger = { path = "../ledger" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+blake3 = { workspace = true }
+hex = { workspace = true }

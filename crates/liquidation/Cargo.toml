@@ -1,0 +1,12 @@
+[package]
+name = "pasion-liquidation"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+pasion-debt-nft = { path = "../debt-nft" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+blake3 = { workspace = true }

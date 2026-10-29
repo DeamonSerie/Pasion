@@ -1,0 +1,10 @@
+[package]
+name = "pasion-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

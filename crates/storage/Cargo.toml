@@ -1,0 +1,16 @@
+[package]
+name = "pasion-storage"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+pasion-ledger = { path = "../ledger" }
+pasion-debt-nft = { path = "../debt-nft" }
+rocksdb = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+thiserror = { workspace = true }
+blake3 = { workspace = true }
+hex = { workspace = true }

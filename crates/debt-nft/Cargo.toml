@@ -1,0 +1,11 @@
+[package]
+name = "pasion-debt-nft"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pasion-types = { path = "../types" }
+pasion-core = { path = "../core" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
