@@ -60,6 +60,12 @@ impl fmt::Display for Hash {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct BlockHeight(pub u64);
 
+impl From<u64> for BlockHeight {
+    fn from(v: u64) -> Self {
+        BlockHeight(v)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Amount(pub u128);
 
@@ -74,6 +80,19 @@ pub struct TxId(pub [u8; 32]);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BundleId(pub [u8; 32]);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BountyId(pub [u8; 32]);
+
+impl BountyId {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        BountyId(bytes)
+    }
+
+    pub fn zero() -> Self {
+        BountyId([0u8; 32])
+    }
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum PasionError {
@@ -107,6 +126,14 @@ pub enum PasionError {
     MustPayDebtInFull,
     #[error("Arbitrage failed")]
     ArbitrageFailed,
+    #[error("Bounty not found")]
+    BountyNotFound,
+    #[error("Bounty expired")]
+    BountyExpired,
+    #[error("Invalid bounty bid")]
+    InvalidBountyBid,
+    #[error("Bounty already settled")]
+    BountyAlreadySettled,
 }
 
 pub type Result<T> = std::result::Result<T, PasionError>;

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use pasion_types::{Address, Amount, AssetId, BlockHeight, Hash, TxId, NftId, BundleId};
+use pasion_types::{Address, Amount, AssetId, BlockHeight, Hash, TxId, NftId, BundleId, BountyId};
 use std::collections::HashMap;
-use pasion_debt_nft::DebtNft;
+use pasion_debt_nft::{DebtNft, Bounty, BountyAuction};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MerkleTree {
@@ -94,6 +94,17 @@ pub enum Transaction {
         debt_nft_id: NftId,
         pool_id: NftId,
     },
+    DepositorWithdraw {
+        tx_id: TxId,
+        nft_id: NftId,
+        depositor: Address,
+    },
+    PlaceBountyBid {
+        tx_id: TxId,
+        bounty_id: BountyId,
+        bidder: Address,
+        amount: Amount,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +139,8 @@ pub struct SharedReplicatedLedger {
     pub state: HashMap<Address, AccountState>,
     pub assets: HashMap<AssetId, Amount>,
     pub nfts: HashMap<NftId, DebtNft>,
+    pub bounties: HashMap<BountyId, Bounty>,
+    pub bounty_auctions: HashMap<BountyId, BountyAuction>,
     pub bonded_set: HashMap<Address, (Amount, String)>,
     pub reputation: HashMap<Address, i64>,
 }
@@ -139,6 +152,8 @@ impl Default for SharedReplicatedLedger {
             state: HashMap::new(),
             assets: HashMap::new(),
             nfts: HashMap::new(),
+            bounties: HashMap::new(),
+            bounty_auctions: HashMap::new(),
             bonded_set: HashMap::new(),
             reputation: HashMap::new(),
         }
@@ -197,6 +212,13 @@ impl SharedReplicatedLedger {
                     touched_nfts.push(*debt_nft_id);
                     touched_nfts.push(*pool_id);
                 }
+                Transaction::DepositorWithdraw { depositor, nft_id, .. } => {
+                    touched_accounts.push(*depositor);
+                    touched_nfts.push(*nft_id);
+                }
+                Transaction::PlaceBountyBid { bidder, .. } => {
+                    touched_accounts.push(*bidder);
+                }
             }
         }
         touched_accounts.sort_by(|a,b| a.0.iter().cmp(b.0.iter()));
@@ -226,4 +248,136 @@ impl SharedReplicatedLedger {
             merkle_tree: MerkleTree::new(leaves),
         }
     }
+}
+
+impl SharedReplicatedLedger {
+    pub fn process_bounty_expiry<H: Into<BlockHeight>>(&mut self, height: H) {
+        let height = height.into();
+        let ids: Vec<BountyId> = self.bounties.iter().filter(|(_, b)| b.end_height == height).map(|(id, _)| *id).collect();
+        for id in ids {
+            let highest = self.bounty_auctions.get(&id).and_then(|a| a.highest.clone());
+            if let Some(h) = highest {
+                if let Some(bounty) = self.bounties.get(&id) {
+                    let currency_id = bounty.currency_id;
+                    let current_amount = bounty.current_amount;
+                    let avg_interest = bounty.avg_interest;
+                    let reward_wallet = bounty.reward_wallet;
+                    let winner = h.bidder;
+                    {
+                        let entry = self.assets.entry(currency_id).or_insert(Amount(0));
+                        entry.0 = entry.0.saturating_add(current_amount.0);
+                    }
+                    {
+                        let acc = self.state.entry(winner).or_insert_with(|| AccountState {
+                            address: winner, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
+                        });
+                        acc.balances.entry(currency_id).and_modify(|e| e.0 += current_amount.0).or_insert(current_amount);
+                    }
+                    let pai_id = AssetId([1u8; 32]);
+                    let pay_amount = avg_interest;
+                    {
+                        if let Some(acc) = self.state.get_mut(&winner) {
+                            if let Some(bal) = acc.balances.get_mut(&pai_id) {
+                                bal.0 = bal.0.saturating_sub(pay_amount.0);
+                            }
+                        }
+                    }
+                    {
+                        let acc = self.state.entry(reward_wallet).or_insert_with(|| AccountState {
+                            address: reward_wallet, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
+                        });
+                        acc.balances.entry(pai_id).and_modify(|e| e.0 += pay_amount.0).or_insert(pay_amount);
+                    }
+                    if let Some(b) = self.bounties.get_mut(&id) {
+                        b.winner = Some(winner);
+                        b.winning_bid = Some(h.amount);
+                        b.status = pasion_debt_nft::BountyStatus::Settled;
+                    }
+                }
+            } else {
+                let (original_amount, _currency_id) = {
+                    if let Some(b) = self.bounties.get(&id) {
+                        (b.original_amount, b.currency_id)
+                    } else { (Amount(0), AssetId([0u8;32])) }
+                };
+                let dist_total = Amount(original_amount.0 * 20 / 100);
+                let wallets: Vec<Address> = self.state.keys().cloned().collect();
+                let n = wallets.len().max(1) as u128;
+                let per = Amount(dist_total.0 / n);
+                let pai_id = AssetId([1u8; 32]);
+                for w in wallets {
+                    let acc = self.state.entry(w).or_insert_with(|| AccountState {
+                        address: w, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
+                    });
+                    acc.balances.entry(pai_id).and_modify(|e| e.0 += per.0).or_insert(per);
+                }
+                {
+                    let entry = self.assets.entry(pai_id).or_insert(Amount(0));
+                    entry.0 = entry.0.saturating_add(dist_total.0);
+                }
+                let burn_remaining = Amount(original_amount.0.saturating_sub(dist_total.0));
+                if let Some(b) = self.bounties.get_mut(&id) {
+                    b.burn_remaining = burn_remaining;
+                    b.status = pasion_debt_nft::BountyStatus::ExpiredNoBids;
+                }
+            }
+        }
+    }
+
+    pub fn process_timed_burn<H: Into<BlockHeight>>(&mut self, height: H) {
+        let height = height.into();
+        let ids: Vec<BountyId> = self.bounties.iter().filter(|(_, b)| b.status == pasion_debt_nft::BountyStatus::ExpiredNoBids && b.burn_remaining.0 > 0).map(|(id, _)| *id).collect();
+        for id in ids {
+            let currency_id = {
+                let b = self.bounties.get(&id).unwrap();
+                b.currency_id
+            };
+            let burn_per_block = {
+                let b = self.bounties.get(&id).unwrap();
+                b.burn_per_block
+            };
+            let burn_amt = {
+                let b = self.bounties.get(&id).unwrap();
+                std::cmp::min(burn_per_block.0, b.burn_remaining.0)
+            };
+            if burn_amt > 0 {
+                {
+                    let entry = self.assets.entry(currency_id).or_insert(Amount(0));
+                    entry.0 = entry.0.saturating_sub(burn_amt);
+                }
+                if let Some(b) = self.bounties.get_mut(&id) {
+                    b.burn_remaining.0 = b.burn_remaining.0.saturating_sub(burn_amt);
+                    if b.burn_remaining.0 == 0 {
+                        b.status = pasion_debt_nft::BountyStatus::Burned;
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn process_bounty_expiry<H: Into<BlockHeight>>(ledger: &mut SharedReplicatedLedger, height: H) {
+        let height = height.into();
+    ledger.process_bounty_expiry(height);
+}
+
+pub fn process_timed_burn<H: Into<BlockHeight>>(ledger: &mut SharedReplicatedLedger, height: H) {
+        let height = height.into();
+    ledger.process_timed_burn(height);
+}
+
+pub fn process_bounty_burn<H: Into<BlockHeight>>(ledger: &mut SharedReplicatedLedger, height: H) {
+        let height = height.into();
+    ledger.process_timed_burn(height);
+}
+
+pub fn process_burn<H: Into<BlockHeight>>(ledger: &mut SharedReplicatedLedger, height: H) {
+        let height = height.into();
+    ledger.process_timed_burn(height);
+}
+
+pub fn process_bounties<H: Into<BlockHeight>>(ledger: &mut SharedReplicatedLedger, height: H) {
+        let height = height.into();
+    ledger.process_bounty_expiry(height);
+    ledger.process_timed_burn(height);
 }

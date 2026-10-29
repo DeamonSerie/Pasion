@@ -1,4 +1,6 @@
 use pasion_types::{Hash, Result, PasionError};
+use pasion_debt_nft::{Bounty, BountyAuction};
+use pasion_types::BountyId;
 use std::path::Path;
 
 pub struct Storage {
@@ -51,6 +53,42 @@ impl Storage {
         let key = format!("nft:{}", hex::encode(nft_id));
         match self.db.get(key.as_bytes()) {
             Ok(v) => Ok(v),
+            Err(e) => Err(PasionError::StorageError(e.to_string())),
+        }
+    }
+
+    pub fn put_bounty(&self, bounty_id: &BountyId, bounty: &Bounty) -> Result<()> {
+        let key = format!("bounty:{}", hex::encode(&bounty_id.0));
+        let bytes = bincode::serialize(bounty).map_err(|e| PasionError::StorageError(e.to_string()))?;
+        self.db.put(key.as_bytes(), &bytes).map_err(|e| PasionError::StorageError(e.to_string()))
+    }
+
+    pub fn get_bounty(&self, bounty_id: &BountyId) -> Result<Option<Bounty>> {
+        let key = format!("bounty:{}", hex::encode(&bounty_id.0));
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(v)) => {
+                let b: Bounty = bincode::deserialize(&v).map_err(|e| PasionError::StorageError(e.to_string()))?;
+                Ok(Some(b))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(PasionError::StorageError(e.to_string())),
+        }
+    }
+
+    pub fn put_bounty_auction(&self, bounty_id: &BountyId, auction: &BountyAuction) -> Result<()> {
+        let key = format!("bounty_auction:{}", hex::encode(&bounty_id.0));
+        let bytes = bincode::serialize(auction).map_err(|e| PasionError::StorageError(e.to_string()))?;
+        self.db.put(key.as_bytes(), &bytes).map_err(|e| PasionError::StorageError(e.to_string()))
+    }
+
+    pub fn get_bounty_auction(&self, bounty_id: &BountyId) -> Result<Option<BountyAuction>> {
+        let key = format!("bounty_auction:{}", hex::encode(&bounty_id.0));
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(v)) => {
+                let a: BountyAuction = bincode::deserialize(&v).map_err(|e| PasionError::StorageError(e.to_string()))?;
+                Ok(Some(a))
+            }
+            Ok(None) => Ok(None),
             Err(e) => Err(PasionError::StorageError(e.to_string())),
         }
     }
