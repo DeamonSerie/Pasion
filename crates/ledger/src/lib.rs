@@ -105,6 +105,23 @@ pub enum Transaction {
         bidder: Address,
         amount: Amount,
     },
+    YieldSplitFreeze {
+        tx_id: TxId,
+        nft_id: NftId,
+        depositor: Address,
+    },
+    SetMinimumYieldSplitters {
+        tx_id: TxId,
+        nft_id: NftId,
+        depositor: Address,
+        minimum: u32,
+    },
+    YieldSplitVote {
+        tx_id: TxId,
+        nft_id: NftId,
+        voter: Address,
+        percentage_bps: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,6 +251,18 @@ impl SharedReplicatedLedger {
                 }
                 Transaction::PlaceBountyBid { bidder, .. } => {
                     touched_accounts.push(*bidder);
+                }
+                Transaction::YieldSplitFreeze { depositor, nft_id, .. } => {
+                    touched_accounts.push(*depositor);
+                    touched_nfts.push(*nft_id);
+                }
+                Transaction::SetMinimumYieldSplitters { depositor, nft_id, .. } => {
+                    touched_accounts.push(*depositor);
+                    touched_nfts.push(*nft_id);
+                }
+                Transaction::YieldSplitVote { voter, nft_id, .. } => {
+                    touched_accounts.push(*voter);
+                    touched_nfts.push(*nft_id);
                 }
             }
         }

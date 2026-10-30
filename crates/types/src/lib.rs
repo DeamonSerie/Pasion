@@ -134,6 +134,8 @@ pub enum PasionError {
     InvalidBountyBid,
     #[error("Bounty already settled")]
     BountyAlreadySettled,
+    #[error("NFT is frozen for yield-split governance")]
+    NftFrozen,
 }
 
 pub type Result<T> = std::result::Result<T, PasionError>;

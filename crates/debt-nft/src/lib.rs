@@ -218,6 +218,13 @@ pub enum DebtEvent {
         incremental: bool,
         height: BlockHeight,
     },
+    YieldSplitterAdded { tx_id: TxId, splitter: Address, height: BlockHeight },
+    YieldSplitFrozen { tx_id: TxId, depositor: Address, height: BlockHeight },
+    MinimumYieldSplittersSet { tx_id: TxId, depositor: Address, minimum: u32, height: BlockHeight },
+    YieldSplitPercentageVoted { tx_id: TxId, voter: Address, percentage_bps: u32, height: BlockHeight },
+    YieldSplitEstablished { tx_id: TxId, percentage_bps: u32, height: BlockHeight },
+    YieldSplitPaid { tx_id: TxId, splitter: Address, amount: Amount, height: BlockHeight },
+    YieldSplitDistribution { tx_id: TxId, depositor: Address, amount: Amount, height: BlockHeight },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,6 +256,20 @@ pub struct DebtNft {
     pub repayment_count: u32,
     pub cumulative_repaid: Amount,
     pub loan_count: u32,
+    #[serde(default)]
+    pub yield_splitters: Vec<Address>,
+    #[serde(default = "default_minimum_yield_splitter_users")]
+    pub minimum_yield_splitter_users: u32,
+    #[serde(default)]
+    pub frozen: bool,
+    #[serde(default)]
+    pub yield_split_established: bool,
+    #[serde(default = "default_yield_split_percentage_bps")]
+    pub yield_split_percentage_bps: u32,
+    #[serde(default)]
+    pub yield_votes: std::collections::HashMap<Address, u32>,
+    #[serde(default)]
+    pub yield_splitter_pending: std::collections::HashMap<Address, Amount>,
 }
 
 impl DebtNft {
@@ -289,11 +310,22 @@ impl DebtNft {
             repayment_count: 0,
             cumulative_repaid: Amount(0),
             loan_count: 0,
+            yield_splitters: Vec::new(),
+            minimum_yield_splitter_users: 6,
+            frozen: false,
+            yield_split_established: false,
+            yield_split_percentage_bps: 1000,
+            yield_votes: std::collections::HashMap::new(),
+            yield_splitter_pending: std::collections::HashMap::new(),
         }
     }
     
     pub fn add_debt_event(&mut self, event: DebtEvent) {
         self.debt_history.push(event);
+    }
+
+    pub fn is_yield_splitter(&self, addr: &Address) -> bool {
+        self.yield_splitters.contains(addr)
     }
     
     pub fn update_value_factor(&mut self) {
@@ -325,3 +357,7 @@ impl DebtNft {
         self.add_debt_event(DebtEvent::Burned { reason, height, dealing_currencies_burned });
     }
 }
+
+
+fn default_minimum_yield_splitter_users() -> u32 { 6 }
+fn default_yield_split_percentage_bps() -> u32 { 1000 }

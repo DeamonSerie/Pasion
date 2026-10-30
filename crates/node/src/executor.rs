@@ -13,6 +13,11 @@ pub const LENDER_MATURE_LOST_LOANABILITY_DELTA: i64 = 10;
 pub const LENDER_EARLY_WITHDRAWAL_DELTA: i64 = -5;
 pub const LENDER_MATURE_WITH_LOANABILITY_DELTA: i64 = 3;
 pub const LENDER_FAILED_BOUNTY_DELTA: i64 = -10;
+pub const YIELD_SPLIT_DEFAULT_PERCENTAGE_BPS: u32 = 1000;
+pub const YIELD_SPLIT_RECURRING_PERCENT: u64 = 10;
+pub const YIELD_SPLIT_RECURRING_INTERVAL: u32 = 6;
+pub const YIELD_SPLIT_TAKER_DELTA: i64 = 8;
+pub const YIELD_SPLITTER_MIN_TAKER_SCORE: i64 = 1;
 
 impl Executor {
     pub fn execute_deposit(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
@@ -44,6 +49,9 @@ impl Executor {
     
     pub fn execute_nft_transfer(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
         if let Transaction::NftTransfer { tx_id, nft_id, from, to, .. } = tx {
+            if ledger.nfts.get(nft_id).map(|n| n.frozen).unwrap_or(false) {
+                return Err(PasionError::NftFrozen);
+            }
             if let Some(nft) = ledger.nfts.get_mut(nft_id) {
                 if nft.status == NftStatus::Burned {
                     return Err(PasionError::CannotTransferBurnedNft);
@@ -80,8 +88,14 @@ impl Executor {
     
     pub fn execute_repay(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
         if let Transaction::Repay { tx_id, borrower, nft_id, amount } = tx {
+            if ledger.nfts.get(nft_id).map(|n| n.frozen).unwrap_or(false) {
+                return Err(PasionError::NftFrozen);
+            }
             let mut taker_delta: i64 = 0;
             let mut do_taker_score = false;
+            let mut pai_yield_credits: Vec<(Address, u128)> = Vec::new();
+            let mut recurring_transfers: Vec<(Address, Address, u128)> = Vec::new();
+            let mut recurring_taker_scores: Vec<Address> = Vec::new();
             if let Some(nft) = ledger.nfts.get_mut(nft_id) {
                 if nft.status == NftStatus::Burned {
                     return Err(PasionError::CannotTransferBurnedNft);
@@ -98,6 +112,7 @@ impl Executor {
                 let loaned_amount = Amount(debt_before + nft.cumulative_repaid.0);
                 let is_full = debt_before <= amount.0;
                 let incremental = nft.repayment_count > 0;
+                let was_full_no_prior = nft.repayment_count == 0 && debt_before > 0 && is_full;
                 let height = BlockHeight(ledger.blocks.len() as u64);
                 if is_full {
                     let boost = if incremental { loaned_amount.0 / 10 } else { loaned_amount.0 };
@@ -106,9 +121,38 @@ impl Executor {
                 } else {
                     nft.available_collateral_backing.0 += amount.0 / 2;
                 }
+                if was_full_no_prior {
+                    if !nft.yield_splitters.contains(borrower) {
+                        nft.yield_splitters.push(*borrower);
+                        nft.add_debt_event(DebtEvent::YieldSplitterAdded { tx_id: *tx_id, splitter: *borrower, height });
+                    }
+                    let interest = nft.calculate_interest(loaned_amount);
+                    let split_amount = interest.0 * (nft.yield_split_percentage_bps as u128) / 10000;
+                    pai_yield_credits.push((*borrower, split_amount));
+                    let entry = nft.yield_splitter_pending.entry(*borrower).or_insert(Amount(0));
+                    entry.0 += split_amount;
+                    nft.deposit_interest_accrued.0 = nft.deposit_interest_accrued.0.saturating_sub(split_amount);
+                    nft.add_debt_event(DebtEvent::YieldSplitPaid { tx_id: *tx_id, splitter: *borrower, amount: Amount(split_amount), height });
+                }
                 nft.debt_balance.0 = nft.debt_balance.0.saturating_sub(amount.0);
                 nft.cumulative_repaid.0 += amount.0;
                 nft.repayment_count += 1;
+                if nft.repayment_count % YIELD_SPLIT_RECURRING_INTERVAL == 0 && nft.yield_split_established {
+                    let splitters = nft.yield_splitters.clone();
+                    let depositor = nft.depositor;
+                    for splitter in splitters {
+                        let pending = nft.yield_splitter_pending.get(&splitter).copied().unwrap_or(Amount(0));
+                        let share = Amount(pending.0 * (YIELD_SPLIT_RECURRING_PERCENT as u128) / 100);
+                        if share.0 > 0 {
+                            recurring_transfers.push((splitter, depositor, share.0));
+                            nft.add_debt_event(DebtEvent::YieldSplitDistribution { tx_id: *tx_id, depositor, amount: share, height });
+                            recurring_taker_scores.push(splitter);
+                        }
+                    }
+                    for splitter in nft.yield_splitters.clone() {
+                        nft.yield_splitter_pending.insert(splitter, Amount(0));
+                    }
+                }
                 if nft.debt_balance.0 == 0 {
                     nft.status = NftStatus::PaidOff;
                     nft.add_debt_event(DebtEvent::DebtPaidInFull { height });
@@ -125,15 +169,51 @@ impl Executor {
             } else {
                 return Err(PasionError::NftNotFound);
             }
+            // apply PAI yield credits
+            let pai_id = AssetId([1u8; 32]);
+            for (addr, amt) in pai_yield_credits {
+                if amt > 0 {
+                    {
+                        let entry = ledger.assets.entry(pai_id).or_insert(Amount(0));
+                        entry.0 = entry.0.saturating_add(amt);
+                    }
+                    {
+                        let acc = ledger.state.entry(addr).or_insert_with(|| pasion_ledger::AccountState {
+                            address: addr, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
+                        });
+                        acc.balances.entry(pai_id).and_modify(|e| e.0 += amt).or_insert(Amount(amt));
+                    }
+                }
+            }
+            // apply recurring transfers
+            for (splitter, depositor, share) in recurring_transfers {
+                if let Some(acc) = ledger.state.get_mut(&splitter) {
+                    if let Some(bal) = acc.balances.get_mut(&pai_id) {
+                        bal.0 = bal.0.saturating_sub(share);
+                    }
+                }
+                {
+                    let acc = ledger.state.entry(depositor).or_insert_with(|| pasion_ledger::AccountState {
+                        address: depositor, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
+                    });
+                    acc.balances.entry(pai_id).and_modify(|e| e.0 += share).or_insert(Amount(share));
+                }
+            }
             if do_taker_score {
                 ledger.adjust_taker_score(*borrower, taker_delta);
+            }
+            for splitter in recurring_taker_scores {
+                ledger.adjust_taker_score(splitter, YIELD_SPLIT_TAKER_DELTA);
             }
         }
         Ok(())
     }
-    
+
     pub fn execute_liquidate(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
         if let Transaction::Liquidate { tx_id: _, nft_id, liquidator } = tx {
+            if ledger.nfts.get(nft_id).map(|n| n.frozen).unwrap_or(false) {
+                return Err(PasionError::NftFrozen);
+            }
             if let Some(nft) = ledger.nfts.get_mut(nft_id) {
                 if nft.status == NftStatus::Burned {
                     return Err(PasionError::CannotTransferBurnedNft);
@@ -150,6 +230,9 @@ impl Executor {
     
     pub fn execute_depositor_withdraw(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
         if let Transaction::DepositorWithdraw { tx_id, nft_id, depositor } = tx {
+            if ledger.nfts.get(nft_id).map(|n| n.frozen).unwrap_or(false) {
+                return Err(PasionError::NftFrozen);
+            }
             let height = BlockHeight(ledger.blocks.len() as u64);
             {
                 let nft = match ledger.nfts.get(nft_id) {
@@ -289,6 +372,97 @@ impl Executor {
         Ok(())
     }
     
+    pub fn execute_yield_split_freeze(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
+        if let Transaction::YieldSplitFreeze { tx_id, nft_id, depositor } = tx {
+            let nft = ledger.nfts.get(nft_id).ok_or(PasionError::NftNotFound)?;
+            if nft.status == NftStatus::Burned {
+                return Err(PasionError::CannotTransferBurnedNft);
+            }
+            if nft.depositor != *depositor {
+                return Err(PasionError::InvalidBlock);
+            }
+            if nft.frozen {
+                return Err(PasionError::InvalidBlock);
+            }
+            let height = BlockHeight(ledger.blocks.len() as u64);
+            if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                nft.frozen = true;
+                nft.add_debt_event(DebtEvent::YieldSplitFrozen { tx_id: *tx_id, depositor: *depositor, height });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn execute_set_minimum_yield_splitters(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
+        if let Transaction::SetMinimumYieldSplitters { tx_id, nft_id, depositor, minimum } = tx {
+            let nft = ledger.nfts.get(nft_id).ok_or(PasionError::NftNotFound)?;
+            if nft.depositor != *depositor {
+                return Err(PasionError::InvalidBlock);
+            }
+            if !nft.frozen {
+                return Err(PasionError::InvalidBlock);
+            }
+            let height = BlockHeight(ledger.blocks.len() as u64);
+            if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                nft.minimum_yield_splitter_users = *minimum;
+                nft.add_debt_event(DebtEvent::MinimumYieldSplittersSet { tx_id: *tx_id, depositor: *depositor, minimum: *minimum, height });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn execute_yield_split_vote(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
+        if let Transaction::YieldSplitVote { tx_id, nft_id, voter, percentage_bps } = tx {
+            let nft = ledger.nfts.get(nft_id).ok_or(PasionError::NftNotFound)?;
+            if !nft.frozen {
+                return Err(PasionError::InvalidBlock);
+            }
+            if !nft.yield_splitters.contains(voter) {
+                return Err(PasionError::InvalidBlock);
+            }
+            if ledger.taker_score(*voter) < YIELD_SPLITTER_MIN_TAKER_SCORE {
+                return Err(PasionError::InvalidBlock);
+            }
+            let height = BlockHeight(ledger.blocks.len() as u64);
+            // record vote
+            if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                nft.yield_votes.insert(*voter, *percentage_bps);
+                nft.add_debt_event(DebtEvent::YieldSplitPercentageVoted { tx_id: *tx_id, voter: *voter, percentage_bps: *percentage_bps, height });
+            }
+            // check majority
+            let (should_finalize, winning_pct) = {
+                let nft = ledger.nfts.get(nft_id).unwrap();
+                if nft.yield_votes.len() * 2 > nft.yield_splitters.len() && nft.yield_splitters.len() >= nft.minimum_yield_splitter_users as usize {
+                    // tally
+                    let mut counts: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+                    for pct in nft.yield_votes.values() {
+                        *counts.entry(*pct).or_insert(0) += 1;
+                    }
+                    let mut best_pct = nft.yield_split_percentage_bps;
+                    let mut best_count = 0usize;
+                    for (pct, count) in counts.iter() {
+                        if *count > best_count || (*count == best_count && *pct > best_pct) {
+                            best_pct = *pct;
+                            best_count = *count;
+                        }
+                    }
+                    (true, best_pct)
+                } else {
+                    (false, 0u32)
+                }
+            };
+            if should_finalize {
+                if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                    nft.yield_split_percentage_bps = winning_pct;
+                    nft.yield_split_established = true;
+                    nft.frozen = false;
+                    nft.add_debt_event(DebtEvent::YieldSplitEstablished { tx_id: *tx_id, percentage_bps: winning_pct, height });
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn execute_place_bounty_bid(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
         if let Transaction::PlaceBountyBid { tx_id: _, bounty_id, bidder, amount } = tx {
             let height = BlockHeight(ledger.blocks.len() as u64);
@@ -791,6 +965,17 @@ mod tests {
     }
 }
 
+
 pub fn execute_place_bounty_bid(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> pasion_types::Result<()> {
     Executor::execute_place_bounty_bid(ledger, tx)
+}
+
+pub fn execute_yield_split_freeze(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> pasion_types::Result<()> {
+    Executor::execute_yield_split_freeze(ledger, tx)
+}
+pub fn execute_set_minimum_yield_splitters(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> pasion_types::Result<()> {
+    Executor::execute_set_minimum_yield_splitters(ledger, tx)
+}
+pub fn execute_yield_split_vote(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> pasion_types::Result<()> {
+    Executor::execute_yield_split_vote(ledger, tx)
 }
