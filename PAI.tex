@@ -330,7 +330,7 @@ On a qualifying repayment:
 \item The split amount is $S = I \cdot p / 10000$, where $p$ is \texttt{yield\_split\_percentage\_bps}, defaulting to $1000$ (ten percent).
 \item $S$ is credited to the borrower's PAI balance and to PAI supply.
 \item The instrument's \texttt{yield\_splitter\_pending} entry for the borrower is increased by $S$.
-\item The instrument's \texttt{deposit\_interest\_accrued} is reduced by $S$ (saturating).
+\item The instrument's \texttt{deposit\_interest\_accrued} is reduced by $S$ (not below zero).
 \item A \texttt{YieldSplitPaid} event is recorded.
 \end{enumerate}
 The repayment itself still applies the existing full-payoff value boost, cumulative repayment tracking, repayment count increment, and taker-score bonus. The split is therefore additive to, not a replacement for, the existing full-repayment rewards.
@@ -343,7 +343,7 @@ After the repayment count is incremented, if the new count is a multiple of six 
 \item If $D > 0$: $D$ is transferred from the splitter's PAI balance to the original depositor's PAI balance, a \texttt{YieldSplitDistribution} event is recorded, and the splitter receives $+8$ taker score.
 \item Regardless of $D$, the splitter's pending earnings are reset to zero.
 \end{enumerate}
-The recurring distribution is an internal PAI transfer between accounts; PAI supply is unchanged. The taker-score adjustment uses the existing clamped $0 \dots 100$ helper and keeps both \texttt{taker\_score} and \texttt{taker\_scores} in sync. The six-repayment cadence and ten-percent share are fixed by protocol constants.
+The recurring distribution is an internal PAI transfer between accounts; PAI supply is unchanged. The taker-score adjustment is bounded between $0$ and $100$ and keeps both \texttt{taker\_score} and \texttt{taker\_scores} in sync. The six-repayment cadence and ten-percent share are fixed by protocol constants.
 
 \subsection{Freeze Enforcement}
 While an instrument is frozen for yield-split governance, no transaction may touch it. Specifically, \texttt{Repay}, \texttt{NftTransfer}, \texttt{DepositorWithdraw}, and \texttt{Liquidate} operations return \texttt{NftFrozen} if the target instrument exists and is frozen, before any state mutation. This guarantees that governance completes without concurrent economic activity on the instrument.
@@ -364,15 +364,15 @@ Establishment occurs only when both of the following hold:
 When these conditions are met, proposals are tallied. The proposal with the most votes wins; ties are broken by the highest percentage. The winning percentage becomes \texttt{yield\_split\_percentage\_bps}, \texttt{yield\_split\_established} becomes true, \texttt{frozen} becomes false, and a \texttt{YieldSplitEstablished} event is recorded. The instrument is thereby unfrozen and recurring distributions may begin.
 
 \subsection{Data Model}
-The instrument gains the following fields, all with serde defaults for backward compatibility with previously serialized instruments:
+The instrument gains the following fields, all with default values for backward compatibility with previously stored instruments:
 \begin{itemize}
-\item \texttt{yield\_splitters}: vector of splitter addresses (default empty).
+\item \texttt{yield\_splitters}: list of splitter addresses (default empty).
 \item \texttt{minimum\_yield\_splitter\_users}: minimum splitter count (default six).
 \item \texttt{frozen}: governance freeze flag (default false).
 \item \texttt{yield\_split\_established}: whether recurring distribution is active (default false).
 \item \texttt{yield\_split\_percentage\_bps}: split percentage in basis points (default $1000$).
-\item \texttt{yield\_votes}: map from voter to proposed percentage.
-\item \texttt{yield\_splitter\_pending}: map from splitter to accrued earnings.
+\item \texttt{yield\_votes}: mapping from voter to proposed percentage.
+\item \texttt{yield\_splitter\_pending}: mapping from splitter to accrued earnings.
 \end{itemize}
 The instrument also exposes \texttt{is\_yield\_splitter(address)}.
 
