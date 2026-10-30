@@ -133,7 +133,7 @@ pub struct AccountState {
     pub bonded_role: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedReplicatedLedger {
     pub blocks: Vec<Block>,
     pub state: HashMap<Address, AccountState>,
@@ -143,6 +143,14 @@ pub struct SharedReplicatedLedger {
     pub bounty_auctions: HashMap<BountyId, BountyAuction>,
     pub bonded_set: HashMap<Address, (Amount, String)>,
     pub reputation: HashMap<Address, i64>,
+    #[serde(default)]
+    pub taker_score: HashMap<Address, i64>,
+    #[serde(default)]
+    pub taker_scores: HashMap<Address, i64>,
+    #[serde(default)]
+    pub lender_score: HashMap<Address, i64>,
+    #[serde(default)]
+    pub lender_scores: HashMap<Address, i64>,
 }
 
 impl Default for SharedReplicatedLedger {
@@ -156,6 +164,10 @@ impl Default for SharedReplicatedLedger {
             bounty_auctions: HashMap::new(),
             bonded_set: HashMap::new(),
             reputation: HashMap::new(),
+            taker_score: HashMap::new(),
+            taker_scores: HashMap::new(),
+            lender_score: HashMap::new(),
+            lender_scores: HashMap::new(),
         }
     }
 }
@@ -176,6 +188,10 @@ impl SharedReplicatedLedger {
         data.extend_from_slice(&(self.blocks.len() as u64).to_le_bytes());
         data.extend_from_slice(&(self.nfts.len() as u64).to_le_bytes());
         data.extend_from_slice(&(self.state.len() as u64).to_le_bytes());
+        data.extend_from_slice(&(self.taker_score.len() as u64).to_le_bytes());
+        data.extend_from_slice(&(self.taker_scores.len() as u64).to_le_bytes());
+        data.extend_from_slice(&(self.lender_score.len() as u64).to_le_bytes());
+        data.extend_from_slice(&(self.lender_scores.len() as u64).to_le_bytes());
         Hash(blake3::hash(&data).into())
     }
     
@@ -295,10 +311,10 @@ impl SharedReplicatedLedger {
                     }
                 }
             } else {
-                let (original_amount, _currency_id) = {
+                let (original_amount, _currency_id, reward_wallet) = {
                     if let Some(b) = self.bounties.get(&id) {
-                        (b.original_amount, b.currency_id)
-                    } else { (Amount(0), AssetId([0u8;32])) }
+                        (b.original_amount, b.currency_id, b.reward_wallet)
+                    } else { (Amount(0), AssetId([0u8;32]), Address::zero()) }
                 };
                 let dist_total = Amount(original_amount.0 * 20 / 100);
                 let wallets: Vec<Address> = self.state.keys().cloned().collect();
@@ -320,6 +336,7 @@ impl SharedReplicatedLedger {
                     b.burn_remaining = burn_remaining;
                     b.status = pasion_debt_nft::BountyStatus::ExpiredNoBids;
                 }
+                self.adjust_lender_score(reward_wallet, -10);
             }
         }
     }
@@ -353,6 +370,31 @@ impl SharedReplicatedLedger {
                 }
             }
         }
+    }
+}
+
+impl SharedReplicatedLedger {
+    pub fn taker_score(&self, addr: Address) -> i64 {
+        self.taker_score.get(&addr).copied().unwrap_or(0)
+    }
+    pub fn lender_score(&self, addr: Address) -> i64 {
+        self.lender_score.get(&addr).copied().unwrap_or(0)
+    }
+    pub fn adjust_taker_score(&mut self, addr: Address, delta: i64) {
+        let cur = self.taker_score.get(&addr).copied().unwrap_or(0);
+        let mut v = cur + delta;
+        if v < 0 { v = 0; }
+        if v > 100 { v = 100; }
+        self.taker_score.insert(addr, v);
+        self.taker_scores.insert(addr, v);
+    }
+    pub fn adjust_lender_score(&mut self, addr: Address, delta: i64) {
+        let cur = self.lender_score.get(&addr).copied().unwrap_or(0);
+        let mut v = cur + delta;
+        if v < 0 { v = 0; }
+        if v > 100 { v = 100; }
+        self.lender_score.insert(addr, v);
+        self.lender_scores.insert(addr, v);
     }
 }
 
