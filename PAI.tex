@@ -13,7 +13,7 @@
 \usepackage{float}
 
 \title{PAI: A Novel Debt-Native Blockchain Protocol}
-\author{PAI Protocol}
+\author{PAI Protocol \\ written by Thomas A. Hugh and contributors}
 \date{\today}
 
 \begin{document}
@@ -55,6 +55,22 @@ PAI operates as a distributed system where network participants maintain identic
 \end{figure}
 
 \section{Network Architecture}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=blue!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (prod) {Block Producer};
+\node [block, right of=prod, xshift=2cm] (val) {Validator};
+\node [block, below of=prod, yshift=-1cm] (ledger) {Shared Replicated Ledger};
+\path [line] (prod) -- (ledger);
+\path [line] (val) -- (ledger);
+\path [line] (prod) -- (val);
+\end{tikzpicture}
+\caption{Network roles sharing a replicated ledger}
+\label{fig:network}
+\end{figure}
+
 \subsection{Node Roles}
 PAI distinguishes between two primary node roles:
 
@@ -117,6 +133,23 @@ The paired validator produces an attestation of block validity after performing 
 \end{figure}
 
 \section{Asset Deposits \& Debt Instruments}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=green!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (dep) {External Deposit};
+\node [block, right of=dep, xshift=2cm] (nft) {Debt Instrument};
+\node [block, below of=nft] (loan) {Loanable Currency};
+\node [block, below of=loan] (res) {Reserve + Interest};
+\path [line] (dep) -- (nft);
+\path [line] (nft) -- (loan);
+\path [line] (nft) -- (res);
+\end{tikzpicture}
+\caption{Deposit creates a debt instrument with split portions}
+\label{fig:deposit}
+\end{figure}
+
 \subsection{Deposit Mechanism}
 Users deposit any external bridged asset into the protocol. Upon deposit confirmation, the protocol creates a debt-tracked instrument linked to the deposit. The deposit amount is split according to consensus parameters into three components:
 \begin{itemize}
@@ -150,6 +183,22 @@ Each deposit generates a unique debt instrument with the following properties:
 The instrument history is append-only and cannot be modified, ensuring complete auditability of all debt-related events.
 
 \section{Lending \& Interest}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=orange!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (inst) {Debt Instrument};
+\node [block, right of=inst, xshift=2cm] (loan) {Loan Issued};
+\node [block, right of=loan, xshift=2cm] (repay) {Repayment + Interest};
+\path [line] (inst) -- (loan);
+\path [line] (loan) -- (repay);
+\path [line] (repay) -- (inst);
+\end{tikzpicture}
+\caption{Lending and interest cycle}
+\label{fig:lending}
+\end{figure}
+
 Loanable currencies are created from deposits and can be issued against debt instruments. Interest accrues according to the rate established at instrument creation. Repayments must be made in the original currency context, with interest calculated as:
 
 \begin{equation}
@@ -204,6 +253,23 @@ The escalation path follows: automatic liquidation $\rightarrow$ liquidation poo
 \end{figure}
 
 \section{Debt Instruments \& Trading}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=red!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (tr) {Transfer Request};
+\node [block, right of=tr, xshift=2cm] (pay) {Full Debt Payment?};
+\node [block, right of=pay, xshift=2cm] (ok) {Transfer Proceeds};
+\node [block, below of=pay] (burn) {Burn Instrument};
+\path [line] (tr) -- (pay);
+\path [line] (pay) -- (ok);
+\path [line] (pay) -- (burn);
+\end{tikzpicture}
+\caption{One-transaction settlement on transfer}
+\label{fig:trading}
+\end{figure}
+
 \subsection{Transfer Restrictions}
 Debt instruments are non-transferable in the standard sense and cannot be treated as conventional digital collectibles. Trading is permitted only under strict conditions enforced at the protocol level.
 
@@ -279,6 +345,23 @@ The value factor is bounded such that $0 \leq V \leq 1$ under normal conditions,
 \end{figure}
 
 \section{Depositor Withdrawal}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=purple!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (wd) {Withdraw};
+\node [block, right of=wd, xshift=2cm] (mint) {Mint to Depositor};
+\node [block, right of=mint, xshift=2cm] (disc) {Discount Affected Loans};
+\node [block, below of=disc] (bounty) {Bounty if Unpaid};
+\path [line] (wd) -- (mint);
+\path [line] (mint) -- (disc);
+\path [line] (disc) -- (bounty);
+\end{tikzpicture}
+\caption{Depositor withdrawal flow}
+\label{fig:withdraw}
+\end{figure}
+
 \subsection{Overview}
 A depositor may withdraw the principal and accrued interest from a debt instrument before all associated loans are settled. The withdrawal mints the total withdrawn amount to the depositor in the instrument's loaned currency and triggers adjustments to affected loans, tracking of withdrawn funds, and, when loans remain unpaid, bounty creation.
 
@@ -308,6 +391,23 @@ This ensures that lost withdrawn value does not remain an unbounded liability ag
 If unpaid affected loans remain after withdrawal, a bounty is created from the withdrawn value, as described in the Bounty System section. The bounty auctions the withdrawn value and either settles it to a bidder or distributes and burns it.
 
 \section{Yield Splitting for Fully Repaid Instruments}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=teal!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (repay) {Full Repayment};
+\node [block, right of=repay, xshift=2cm] (split) {Yield Splitter};
+\node [block, right of=split, xshift=2cm] (dist) {Recurring Distribution};
+\node [block, below of=split] (freeze) {Freeze / Vote};
+\path [line] (repay) -- (split);
+\path [line] (split) -- (dist);
+\path [line] (split) -- (freeze);
+\end{tikzpicture}
+\caption{Yield splitting lifecycle}
+\label{fig:yieldsplit}
+\end{figure}
+
 \subsection{Overview}
 When a borrower fully repays a debt instrument with no prior repayments on that instrument, the borrower becomes a \textit{yield splitter} for the instrument. Yield splitting diverts a portion of the interest that would otherwise accrue to depositors to the splitter, converted one-to-one to PAI, and accrues it as splitter earnings. The mechanism rewards disciplined full repayment while preserving depositor returns through a governed, recurring distribution. Yield splitting is tracked immutably on the instrument through dedicated debt events.
 
@@ -390,6 +490,23 @@ New transactions: \texttt{YieldSplitFreeze}, \texttt{SetMinimumYieldSplitters}, 
 \end{itemize}
 
 \section{Bounty System}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=brown!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (create) {Bounty Created};
+\node [block, right of=create, xshift=2cm] (auction) {Auction};
+\node [block, right of=auction, xshift=2cm] (win) {Winner Settles};
+\node [block, below of=auction] (burn) {Timed Burn};
+\path [line] (create) -- (auction);
+\path [line] (auction) -- (win);
+\path [line] (auction) -- (burn);
+\end{tikzpicture}
+\caption{Bounty auction lifecycle}
+\label{fig:bounty}
+\end{figure}
+
 \subsection{Overview}
 A bounty is created when a depositor withdraws from a debt instrument while affected loans remain unpaid. The bounty represents the withdrawn minted value and is auctioned on-chain in the instrument's loaned currency. If a bidder wins, the winner receives the bounty currency and pays PAI to the reward wallet. If no bids arrive by expiry, a portion of the value is distributed as PAI to all wallets and the remainder is burned over time.
 
@@ -463,6 +580,21 @@ where $\text{burn\_per\_block}$ equals the average interest. The amount is remov
 \end{itemize}
 
 \section{Bridging}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=gray!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (ext) {External Asset};
+\node [block, right of=ext, xshift=2cm] (bridge) {Federated Bridge};
+\node [block, right of=bridge, xshift=2cm] (dep) {Deposit -> Instrument};
+\path [line] (ext) -- (bridge);
+\path [line] (bridge) -- (dep);
+\end{tikzpicture}
+\caption{Bridging flow}
+\label{fig:bridge}
+\end{figure}
+
 PAI supports external asset deposits through a bridging mechanism. The initial implementation uses a federated bridge approach:
 
 \begin{itemize}
@@ -533,6 +665,21 @@ Block rewards and fees are distributed to network participants:
 \end{figure}
 
 \section{Validation, Attestation \& Cross-Verification}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=blue!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (view) {Block-Relevant View};
+\node [block, right of=view, xshift=2cm] (attest) {Validator Attestation};
+\node [block, right of=attest, xshift=2cm] (verify) {Producer Verify};
+\path [line] (view) -- (attest);
+\path [line] (attest) -- (verify);
+\end{tikzpicture}
+\caption{Block-relevant validation and attestation}
+\label{fig:validation}
+\end{figure}
+
 \subsection{Block-Relevant State Construction}
 For each block, nodes construct a view containing only touched elements:
 \begin{itemize}
@@ -550,6 +697,21 @@ The paired validator validates all transactions against the block-relevant view 
 The block producer receives the attestation and verifies it against its own view of the shared replicated ledger. Both parties reference identical ledger state, simplifying cross-verification. Disagreements trigger slashing mechanisms.
 
 \section{Reputation \& Slashing}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=yellow!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (rep) {Reputation};
+\node [block, right of=rep, xshift=2cm] (decay) {Decay Over Time};
+\node [block, right of=decay, xshift=2cm] (slash) {Slashing Penalty};
+\path [line] (rep) -- (decay);
+\path [line] (decay) -- (slash);
+\end{tikzpicture}
+\caption{Reputation and slashing}
+\label{fig:reputation}
+\end{figure}
+
 \subsection{Reputation System}
 Reputation determines committee selection weight and reflects participant reliability. Factors include:
 \begin{itemize}
@@ -594,6 +756,22 @@ Slashable offenses include:
 Committee members are selected via reputation-weighted selection from non-paired eligible participants, favoring high-reputation, reliable nodes while maintaining decentralization.
 
 \section{Security Considerations}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=red!10, text width=5em, text centered, rounded corners, minimum height=2.5em},
+    line/.style={draw, -latex}]
+\node [block] (eco) {Economic Security};
+\node [block, right of=eco, xshift=2cm] (debt) {Debt Enforcement};
+\node [block, below of=eco] (cons) {Consensus Security};
+\node [block, right of=cons, xshift=2cm] (inv) {Invariant Enforcement};
+\path [line] (eco) -- (debt);
+\path [line] (cons) -- (inv);
+\end{tikzpicture}
+\caption{Security layers}
+\label{fig:security}
+\end{figure}
+
 \subsection{Economic Security}
 \begin{itemize}
 \item Bonding requirements ensure economic stake in honest behavior
