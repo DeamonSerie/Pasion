@@ -58,14 +58,33 @@ impl Executor {
                 if nft.status == NftStatus::Burned {
                     return Err(PasionError::CannotTransferBurnedNft);
                 }
-                let interest = nft.calculate_interest(*amount);
+                if nft.status == NftStatus::PaidOff {
+                    return Ok(());
+                }
+                let debt_before = nft.debt_balance.0;
+                if debt_before == 0 {
+                    nft.status = NftStatus::PaidOff;
+                    nft.update_value_factor();
+                    return Ok(());
+                }
+                let loaned_amount = Amount(debt_before + nft.cumulative_repaid.0);
+                let is_full = debt_before <= amount.0;
+                let incremental = nft.repayment_count > 0;
+                let height = BlockHeight(ledger.blocks.len() as u64);
+                if is_full {
+                    let boost = if incremental { loaned_amount.0 / 10 } else { loaned_amount.0 };
+                    nft.available_collateral_backing.0 += boost;
+                    nft.add_debt_event(DebtEvent::FullRepaymentBoost { tx_id: *tx_id, loaned_amount, boost_amount: Amount(boost), incremental, height });
+                } else {
+                    nft.available_collateral_backing.0 += amount.0 / 2;
+                }
                 nft.debt_balance.0 = nft.debt_balance.0.saturating_sub(amount.0);
-                nft.add_debt_event(DebtEvent::Repayment { tx_id: *tx_id, amount: *amount, interest_paid: interest, height: BlockHeight(ledger.blocks.len() as u64) });
+                nft.cumulative_repaid.0 += amount.0;
+                nft.repayment_count += 1;
                 if nft.debt_balance.0 == 0 {
                     nft.status = NftStatus::PaidOff;
-                    nft.add_debt_event(DebtEvent::DebtPaidInFull { height: BlockHeight(ledger.blocks.len() as u64) });
+                    nft.add_debt_event(DebtEvent::DebtPaidInFull { height });
                 }
-                nft.available_collateral_backing.0 += amount.0 / 2;
                 nft.update_value_factor();
             } else {
                 return Err(PasionError::NftNotFound);

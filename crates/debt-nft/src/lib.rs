@@ -203,6 +203,13 @@ pub enum DebtEvent {
         status: TrackedFundStatus,
         height: BlockHeight,
     },
+    FullRepaymentBoost {
+        tx_id: TxId,
+        loaned_amount: Amount,
+        boost_amount: Amount,
+        incremental: bool,
+        height: BlockHeight,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,6 +237,8 @@ pub struct DebtNft {
     pub deposit_interest_accrued: Amount,
     pub affected_loans: Vec<AffectedLoan>,
     pub withdrawn_funds_tracked: Vec<TrackedFund>,
+    pub repayment_count: u32,
+    pub cumulative_repaid: Amount,
 }
 
 impl DebtNft {
@@ -266,6 +275,8 @@ impl DebtNft {
             deposit_interest_accrued: Amount(0),
             affected_loans: Vec::new(),
             withdrawn_funds_tracked: Vec::new(),
+            repayment_count: 0,
+            cumulative_repaid: Amount(0),
         }
     }
     
@@ -279,9 +290,6 @@ impl DebtNft {
         } else {
             self.value_factor = (self.available_collateral_backing.0 as f64) 
                 / (self.total_minted_from_nft.0 as f64);
-            if self.value_factor > 1.0 {
-                self.value_factor = 1.0;
-            }
             if self.value_factor < 0.0 {
                 self.value_factor = 0.0;
             }
