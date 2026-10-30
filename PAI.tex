@@ -125,6 +125,15 @@ Users deposit any external bridged asset into the protocol. Upon deposit confirm
 \item Interest pool portion
 \end{itemize}
 
+The loanable portion is computed from the deposit and the instrument's current loan count:
+\begin{equation}
+\text{loanable\_pct} = \mathrm{clamp}(70 - 5\cdot \text{loan\_count},\,20,\,70)
+\end{equation}
+\begin{equation}
+\text{loanable} = \text{deposit\_amount} \cdot \frac{\text{loanable\_pct}}{100}
+\end{equation}
+This value is stored both as \texttt{total\_minted\_from\_nft} (the denominator used by the value factor) and as \texttt{deposit\_loanability}. At deposit time \texttt{loan\_count} is zero, so the initial loanability is $70\%$ of the deposit.
+
 \subsection{Debt Instruments}
 Each deposit generates a unique debt instrument with the following properties:
 \begin{itemize}
@@ -133,6 +142,8 @@ Each deposit generates a unique debt instrument with the following properties:
 \item Associated loanable currency
 \item Tracked debt balance and interest obligations
 \item Value factor determining economic weight
+\item Deposit loanability (\texttt{deposit\_loanability}) recording the deposit-derived loanable amount
+\item Loan count (\texttt{loan\_count}) tracking loans associated with the instrument
 \item Status indicating active, liquidating, burned, or paid-off state
 \end{itemize}
 
@@ -206,6 +217,16 @@ When transferring a debt instrument, the receiver must pay all outstanding debts
 \item If full payment provided, debts are satisfied and transfer proceeds
 \end{enumerate}
 
+\subsection{Loanability Reset on Successful Transfer}
+When a transfer succeeds and ownership actually changes (\texttt{from} $\neq$ \texttt{to}), the protocol resets the instrument's deposit-derived loanability to its initial value before recording the new owner:
+\begin{enumerate}
+\item \texttt{deposit\_loanability} is reset to $\text{deposit\_amount} \cdot 70 / 100$.
+\item \texttt{total\_minted\_from\_nft} is set to the new \texttt{deposit\_loanability}.
+\item \texttt{loan\_count} is reset to $0$.
+\item \texttt{update\_value\_factor()} recomputes the value factor from the new denominator.
+\end{enumerate}
+A \texttt{LoanabilityReset} event is appended to the instrument's immutable \texttt{debt\_history}, recording the transaction id, previous owner, new owner, previous loanability, new loanability, and block height. The reset preserves \texttt{available\_collateral\_backing}, \texttt{deposit\_amount}, and repayment history. No reset occurs for self-transfers (\texttt{from} = \texttt{to}), for transfers with unpaid debt (the instrument is burned), or for already-burned instruments.
+
 \subsection{Burning Mechanism}
 Burning is permanent and irreversible. When triggered:
 \begin{itemize}
@@ -240,6 +261,7 @@ where $C_{avail}$ is available collateral backing, $M_{total}$ is total currenci
 \item \textbf{Repayment restoration}: When currencies are repaid, $C_{avail}$ increases and the repayment credit $\rho$ restores value
 \item \textbf{Full repayment}: Paying off loans in full with interest affects value distribution on subsequent sales
 \item \textbf{Tracking}: Value factor is tracked on-chain and all changes are recorded in immutable history
+\item \textbf{Loanability reset on sale}: on a successful ownership change, \texttt{total\_minted\_from\_nft} is reset to the initial loanability and $V$ is recomputed
 \end{itemize}
 
 The value factor is bounded such that $0 \leq V \leq 1$ under normal conditions, with restoration mechanisms preventing permanent value collapse through repayment.
@@ -560,6 +582,8 @@ Target Gas Usage & Protocol defined \\
 \subsection{Glossary}
 \begin{description}
 \item[Debt Instrument] A protocol-level record tracking collateral, debt obligations, and history for a deposit.
+\item[Deposit Loanability] Deposit-derived loanable amount recorded on a debt instrument, reset to $70\%$ of the deposit on a successful sale.
+\item[Loanability Reset] Immutable \texttt{LoanabilityReset} event recording the reset of deposit loanability and loan count on a successful ownership change.
 \item[Block-Relevant Validation] Validation limited to state elements touched by transactions in the current block.
 \item[Custom Attested Bundle] Consensus mechanism combining sealed-bid auctions, pairwise production, and committee attestation.
 \item[Shared Replicated Ledger] Canonical ledger state maintained identically across all network participants.

@@ -152,6 +152,14 @@ pub enum DebtEvent {
         to: Address,
         height: BlockHeight,
     },
+    LoanabilityReset {
+        tx_id: TxId,
+        from: Address,
+        to: Address,
+        previous_loanability: Amount,
+        new_loanability: Amount,
+        height: BlockHeight,
+    },
     LiquidationStarted {
         tx_id: TxId,
         height: BlockHeight,
@@ -228,6 +236,7 @@ pub struct DebtNft {
     pub status: NftStatus,
     pub value_factor: f64,
     pub total_minted_from_nft: Amount,
+    pub deposit_loanability: Amount,
     pub available_collateral_backing: Amount,
     pub dealing_currencies: Vec<(AssetId, Amount)>,
     pub can_be_transferred: bool,
@@ -239,6 +248,7 @@ pub struct DebtNft {
     pub withdrawn_funds_tracked: Vec<TrackedFund>,
     pub repayment_count: u32,
     pub cumulative_repaid: Amount,
+    pub loan_count: u32,
 }
 
 impl DebtNft {
@@ -266,6 +276,7 @@ impl DebtNft {
             status: NftStatus::Active,
             value_factor: 1.0,
             total_minted_from_nft: Amount(0),
+            deposit_loanability: Amount(deposit_amount.0 * 70 / 100),
             available_collateral_backing: deposit_amount,
             dealing_currencies: Vec::new(),
             can_be_transferred: true,
@@ -277,6 +288,7 @@ impl DebtNft {
             withdrawn_funds_tracked: Vec::new(),
             repayment_count: 0,
             cumulative_repaid: Amount(0),
+            loan_count: 0,
         }
     }
     
