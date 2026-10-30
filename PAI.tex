@@ -21,7 +21,7 @@
 \maketitle
 
 \begin{abstract}
-PAI is a debt-native blockchain protocol that introduces a novel lending primitive built around non-transferable-in-default debt instruments. The protocol enables deposits of external assets to create debt-tracked instruments, generates loanable currencies derived from those deposits, and enforces strict debt obligations through immutable records. A custom consensus mechanism called \textit{Custom Attested Bundle} coordinates block production through sealed-bid auctions between paired producers and a rotating reputation-weighted committee. The system employs block-relevant validation against a shared replicated ledger, enforces one-transaction full debt settlement on instrument transfers with automatic burning on failure, and implements liquidation through pools with arbitrage mechanisms. The native currency PAI has a dynamic supply with fee burning and rewards distributed to network participants. The protocol further introduces a bounty lifecycle: when a depositor withdraws before unpaid loans are settled, a bounty is created from the withdrawn value and auctioned on-chain, with settlement to the highest bidder or, absent bids, proportional distribution and timed burning. This paper presents the complete system design, economic mechanisms, and security considerations.
+PAI is a debt-native blockchain protocol that introduces a novel lending primitive built around non-transferable-in-default debt instruments. The protocol enables deposits of external assets to create debt-tracked instruments, generates loanable currencies derived from those deposits, and enforces strict debt obligations through immutable records. A custom consensus mechanism called \textit{Custom Attested Bundle} coordinates block production through sealed-bid auctions between paired producers and a rotating reputation-weighted committee. The system employs block-relevant validation against a shared replicated ledger, enforces one-transaction full debt settlement on instrument transfers with automatic burning on failure, and implements liquidation through pools with arbitrage mechanisms. The native currency PAI has a dynamic supply with fee burning and rewards distributed to network participants. The protocol further introduces a bounty lifecycle: when a depositor withdraws before unpaid loans are settled, a bounty is created from the withdrawn value and auctioned on-chain, with settlement to the highest bidder or, absent bids, proportional distribution and timed burning. In addition, when a borrower fully repays a debt instrument with no prior repayments, that borrower becomes a yield splitter: a portion of the interest that would otherwise accrue to depositors is converted one-to-one to PAI and accrued as splitter earnings, and every six repayments each splitter distributes ten percent of accrued earnings to the original depositor while receiving taker-score units. Depositors may freeze an instrument to govern the minimum splitter count and yield splitters vote on the split percentage before the instrument unfreezes. This paper presents the complete system design, economic mechanisms, and security considerations.
 \end{abstract}
 
 \tableofcontents
@@ -30,7 +30,7 @@ PAI is a debt-native blockchain protocol that introduces a novel lending primiti
 \section{Introduction}
 Traditional blockchain systems lack native primitives for debt creation, enforcement, and liquidation in a unified manner. PAI addresses this gap by treating debt as a first-class primitive embedded at the protocol level. Rather than relying solely on smart contracts for lending logic, PAI encodes debt obligations, value mechanics, and liquidation paths directly into the protocol state machine.
 
-The protocol introduces several innovations: (1) deposit-derived debt instruments with immutable history, (2) a custom consensus model combining pairwise production with committee attestation, (3) block-relevant validation that maintains security while limiting computational scope, (4) strict transfer mechanics requiring full debt settlement in a single transaction, (5) automatic liquidation escalation through pools to arbitrageurs, and (6) a ratio-based value factor mechanism, and (7) a bounty lifecycle that auctions withdrawn value when loans remain unpaid.
+The protocol introduces several innovations: (1) deposit-derived debt instruments with immutable history, (2) a custom consensus model combining pairwise production with committee attestation, (3) block-relevant validation that maintains security while limiting computational scope, (4) strict transfer mechanics requiring full debt settlement in a single transaction, (5) automatic liquidation escalation through pools to arbitrageurs, and (6) a ratio-based value factor mechanism, and (7) a bounty lifecycle that auctions withdrawn value when loans remain unpaid, and (8) yield splitting that rewards borrowers who fully repay with no prior repayments by diverting a portion of depositor interest to them as PAI, with recurring distributions and depositor-governed freeze/vote controls.
 
 \section{System Overview}
 PAI operates as a distributed system where network participants maintain identical copies of a shared replicated immutable ledger. All state transitions are append-only and fully auditable through immutable history records. The protocol enforces economic invariants at the consensus and execution layers, ensuring that debt obligations cannot be circumvented and that failed settlements trigger predetermined consequences.
@@ -306,6 +306,88 @@ This ensures that lost withdrawn value does not remain an unbounded liability ag
 
 \subsection{Bounty Hook}
 If unpaid affected loans remain after withdrawal, a bounty is created from the withdrawn value, as described in the Bounty System section. The bounty auctions the withdrawn value and either settles it to a bidder or distributes and burns it.
+
+\section{Yield Splitting for Fully Repaid Instruments}
+\subsection{Overview}
+When a borrower fully repays a debt instrument with no prior repayments on that instrument, the borrower becomes a \textit{yield splitter} for the instrument. Yield splitting diverts a portion of the interest that would otherwise accrue to depositors to the splitter, converted one-to-one to PAI, and accrues it as splitter earnings. The mechanism rewards disciplined full repayment while preserving depositor returns through a governed, recurring distribution. Yield splitting is tracked immutably on the instrument through dedicated debt events.
+
+\subsection{Qualifying Repayment}
+A repayment qualifies when all of the following hold before the repayment is applied:
+\begin{itemize}
+\item The instrument exists and is not burned, paid off, or frozen.
+\item The outstanding debt before repayment is strictly greater than zero.
+\item The repayment amount is at least the outstanding debt before repayment.
+\item The instrument's repayment count is zero.
+\end{itemize}
+The no-prior-repayment condition ensures that only the first full repayment on an instrument creates a yield splitter; subsequent repayments by the same or other borrowers do not re-qualify.
+
+\subsection{Yield Splitter Addition and Initial PAI Payment}
+On a qualifying repayment:
+\begin{enumerate}
+\item The borrower is added to the instrument's \texttt{yield\_splitters} list if not already present, and a \texttt{YieldSplitterAdded} event is recorded.
+\item The loaned amount is reconstructed as $L = d + c$, where $d$ is the debt before repayment and $c$ is the cumulative repaid amount before this repayment.
+\item The interest basis is $I = \mathrm{calculate\_interest}(L)$ using the instrument's interest rate in basis points.
+\item The split amount is $S = I \cdot p / 10000$, where $p$ is \texttt{yield\_split\_percentage\_bps}, defaulting to $1000$ (ten percent).
+\item $S$ is credited to the borrower's PAI balance and to PAI supply.
+\item The instrument's \texttt{yield\_splitter\_pending} entry for the borrower is increased by $S$.
+\item The instrument's \texttt{deposit\_interest\_accrued} is reduced by $S$ (saturating).
+\item A \texttt{YieldSplitPaid} event is recorded.
+\end{enumerate}
+The repayment itself still applies the existing full-payoff value boost, cumulative repayment tracking, repayment count increment, and taker-score bonus. The split is therefore additive to, not a replacement for, the existing full-repayment rewards.
+
+\subsection{Recurring Distribution}
+After the repayment count is incremented, if the new count is a multiple of six and yield splitting has been established, a recurring distribution occurs. For each splitter in \texttt{yield\_splitters}:
+\begin{enumerate}
+\item The pending earnings $E$ for that splitter are retrieved (defaulting to zero).
+\item The share is $D = E \cdot 10 / 100$ (ten percent).
+\item If $D > 0$: $D$ is transferred from the splitter's PAI balance to the original depositor's PAI balance, a \texttt{YieldSplitDistribution} event is recorded, and the splitter receives $+8$ taker score.
+\item Regardless of $D$, the splitter's pending earnings are reset to zero.
+\end{enumerate}
+The recurring distribution is an internal PAI transfer between accounts; PAI supply is unchanged. The taker-score adjustment uses the existing clamped $0 \dots 100$ helper and keeps both \texttt{taker\_score} and \texttt{taker\_scores} in sync. The six-repayment cadence and ten-percent share are fixed by protocol constants.
+
+\subsection{Freeze Enforcement}
+While an instrument is frozen for yield-split governance, no transaction may touch it. Specifically, \texttt{Repay}, \texttt{NftTransfer}, \texttt{DepositorWithdraw}, and \texttt{Liquidate} operations return \texttt{NftFrozen} if the target instrument exists and is frozen, before any state mutation. This guarantees that governance completes without concurrent economic activity on the instrument.
+
+\subsection{Depositor Freeze and Minimum Splitter Count}
+The original depositor may freeze an active, non-burned instrument by submitting a \texttt{YieldSplitFreeze} transaction. The instrument must not already be frozen and the submitter must be the depositor. Freezing sets \texttt{frozen = true} and records a \texttt{YieldSplitFrozen} event.
+
+While frozen, the depositor may adjust the minimum required number of yield splitters via \texttt{SetMinimumYieldSplitters}. The minimum defaults to six and is stored as \texttt{minimum\_yield\_splitter\_users}. Adjusting it records a \texttt{MinimumYieldSplittersSet} event.
+
+\subsection{Yield Splitter Voting and Establishment}
+Eligible yield splitters are those listed in \texttt{yield\_splitters} whose taker score is at least one. Each eligible splitter may vote on a proposed split percentage in basis points via \texttt{YieldSplitVote}. Votes are recorded in \texttt{yield\_votes} keyed by voter, and a \texttt{YieldSplitPercentageVoted} event is recorded.
+
+Establishment occurs only when both of the following hold:
+\begin{itemize}
+\item The number of distinct votes is a strict majority of \texttt{yield\_splitters}: $\text{votes} \times 2 > \text{splitters}$.
+\item The number of yield splitters is at least the configured minimum: $\text{splitters} \geq \text{minimum\_yield\_splitter\_users}$.
+\end{itemize}
+When these conditions are met, proposals are tallied. The proposal with the most votes wins; ties are broken by the highest percentage. The winning percentage becomes \texttt{yield\_split\_percentage\_bps}, \texttt{yield\_split\_established} becomes true, \texttt{frozen} becomes false, and a \texttt{YieldSplitEstablished} event is recorded. The instrument is thereby unfrozen and recurring distributions may begin.
+
+\subsection{Data Model}
+The instrument gains the following fields, all with serde defaults for backward compatibility with previously serialized instruments:
+\begin{itemize}
+\item \texttt{yield\_splitters}: vector of splitter addresses (default empty).
+\item \texttt{minimum\_yield\_splitter\_users}: minimum splitter count (default six).
+\item \texttt{frozen}: governance freeze flag (default false).
+\item \texttt{yield\_split\_established}: whether recurring distribution is active (default false).
+\item \texttt{yield\_split\_percentage\_bps}: split percentage in basis points (default $1000$).
+\item \texttt{yield\_votes}: map from voter to proposed percentage.
+\item \texttt{yield\_splitter\_pending}: map from splitter to accrued earnings.
+\end{itemize}
+The instrument also exposes \texttt{is\_yield\_splitter(address)}.
+
+New debt events: \texttt{YieldSplitterAdded}, \texttt{YieldSplitFrozen}, \texttt{MinimumYieldSplittersSet}, \texttt{YieldSplitPercentageVoted}, \texttt{YieldSplitEstablished}, \texttt{YieldSplitPaid}, and \texttt{YieldSplitDistribution}.
+
+New transactions: \texttt{YieldSplitFreeze}, \texttt{SetMinimumYieldSplitters}, and \texttt{YieldSplitVote}. Block-relevant state construction touches the depositor or voter account and the instrument for each. A new error, \texttt{NftFrozen}, signals that an operation was rejected because the instrument is frozen.
+
+\subsection{Protocol Constants}
+\begin{itemize}
+\item \texttt{YIELD\_SPLIT\_DEFAULT\_PERCENTAGE\_BPS} $= 1000$ (ten percent).
+\item \texttt{YIELD\_SPLIT\_RECURRING\_PERCENT} $= 10$ (ten percent of accrued earnings).
+\item \texttt{YIELD\_SPLIT\_RECURRING\_INTERVAL} $= 6$ repayments.
+\item \texttt{YIELD\_SPLIT\_TAKER\_DELTA} $= +8$ taker score per recurring distribution.
+\item \texttt{YIELD\_SPLITTER\_MIN\_TAKER\_SCORE} $= 1$ for voter eligibility.
+\end{itemize}
 
 \section{Bounty System}
 \subsection{Overview}
