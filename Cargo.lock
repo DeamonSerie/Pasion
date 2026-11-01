@@ -4242,7 +4242,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pasion-debt-nft"
+name = "pasion-debt-ledger"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -4259,7 +4259,7 @@ dependencies = [
  "bincode",
  "blake3",
  "pasion-core",
- "pasion-debt-nft",
+ "pasion-debt-ledger",
  "pasion-types",
  "serde",
  "sha2",
@@ -4281,7 +4281,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "pasion-core",
- "pasion-debt-nft",
+ "pasion-debt-ledger",
  "pasion-types",
  "serde",
  "thiserror 1.0.69",
@@ -4309,7 +4309,7 @@ dependencies = [
  "pasion-bridge",
  "pasion-consensus",
  "pasion-core",
- "pasion-debt-nft",
+ "pasion-debt-ledger",
  "pasion-ledger",
  "pasion-liquidation",
  "pasion-network",
@@ -4345,7 +4345,7 @@ dependencies = [
  "blake3",
  "hex",
  "pasion-core",
- "pasion-debt-nft",
+ "pasion-debt-ledger",
  "pasion-ledger",
  "pasion-types",
  "rocksdb",

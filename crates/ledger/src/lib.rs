@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use pasion_types::{Address, Amount, AssetId, BlockHeight, Hash, TxId, NftId, BundleId, BountyId};
+use pasion_types::{Address, Amount, AssetId, BlockHeight, Hash, TxId, LedgerId, BundleId, BountyId};
 use std::collections::HashMap;
-use pasion_debt_nft::{DebtNft, Bounty, BountyAuction};
+use pasion_debt_ledger::{DebtLedger, Bounty, BountyAuction};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MerkleTree {
@@ -49,7 +49,7 @@ pub struct BlockRelevantState {
     pub height: BlockHeight,
     pub touched_accounts: Vec<Address>,
     pub touched_assets: Vec<AssetId>,
-    pub touched_nfts: Vec<NftId>,
+    pub touched_ledgers: Vec<LedgerId>,
     pub state_roots: HashMap<String, Hash>,
     pub merkle_tree: MerkleTree,
 }
@@ -63,29 +63,29 @@ pub enum Transaction {
         amount: Amount,
         bridge_proof: Vec<u8>,
         #[serde(default)]
-        target_nft_id: Option<NftId>,
+        target_ledger_id: Option<LedgerId>,
     },
     Loan {
         tx_id: TxId,
         borrower: Address,
-        nft_id: NftId,
+        ledger_id: LedgerId,
         amount: Amount,
         currency_id: AssetId,
     },
     Repay {
         tx_id: TxId,
         borrower: Address,
-        nft_id: NftId,
+        ledger_id: LedgerId,
         amount: Amount,
     },
     Liquidate {
         tx_id: TxId,
-        nft_id: NftId,
+        ledger_id: LedgerId,
         liquidator: Address,
     },
-    NftTransfer {
+    LedgerTransfer {
         tx_id: TxId,
-        nft_id: NftId,
+        ledger_id: LedgerId,
         from: Address,
         to: Address,
         pay_debts_in_one_tx: bool,
@@ -93,12 +93,12 @@ pub enum Transaction {
     ArbBorrow {
         tx_id: TxId,
         arbitrageur: Address,
-        debt_nft_id: NftId,
-        pool_id: NftId,
+        debt_ledger_id: LedgerId,
+        pool_id: LedgerId,
     },
     DepositorWithdraw {
         tx_id: TxId,
-        nft_id: NftId,
+        ledger_id: LedgerId,
         depositor: Address,
     },
     PlaceBountyBid {
@@ -109,24 +109,24 @@ pub enum Transaction {
     },
     YieldSplitFreeze {
         tx_id: TxId,
-        nft_id: NftId,
+        ledger_id: LedgerId,
         depositor: Address,
     },
     SetMinimumYieldSplitters {
         tx_id: TxId,
-        nft_id: NftId,
+        ledger_id: LedgerId,
         depositor: Address,
         minimum: u32,
     },
     YieldSplitVote {
         tx_id: TxId,
-        nft_id: NftId,
+        ledger_id: LedgerId,
         voter: Address,
         percentage_bps: u32,
     },
-    NftStarterSale {
+    LedgerStarterSale {
         tx_id: TxId,
-        nft_id: NftId,
+        ledger_id: LedgerId,
         seller: Address,
         buyer: Address,
         accepted: bool,
@@ -164,7 +164,7 @@ pub struct SharedReplicatedLedger {
     pub blocks: Vec<Block>,
     pub state: HashMap<Address, AccountState>,
     pub assets: HashMap<AssetId, Amount>,
-    pub nfts: HashMap<NftId, DebtNft>,
+    pub ledgers: HashMap<LedgerId, DebtLedger>,
     pub bounties: HashMap<BountyId, Bounty>,
     pub bounty_auctions: HashMap<BountyId, BountyAuction>,
     pub bonded_set: HashMap<Address, (Amount, String)>,
@@ -185,7 +185,7 @@ impl Default for SharedReplicatedLedger {
             blocks: Vec::new(),
             state: HashMap::new(),
             assets: HashMap::new(),
-            nfts: HashMap::new(),
+            ledgers: HashMap::new(),
             bounties: HashMap::new(),
             bounty_auctions: HashMap::new(),
             bonded_set: HashMap::new(),
@@ -212,7 +212,7 @@ impl SharedReplicatedLedger {
     pub fn compute_state_root(&self) -> Hash {
         let mut data = Vec::new();
         data.extend_from_slice(&(self.blocks.len() as u64).to_le_bytes());
-        data.extend_from_slice(&(self.nfts.len() as u64).to_le_bytes());
+        data.extend_from_slice(&(self.ledgers.len() as u64).to_le_bytes());
         data.extend_from_slice(&(self.state.len() as u64).to_le_bytes());
         data.extend_from_slice(&(self.taker_score.len() as u64).to_le_bytes());
         data.extend_from_slice(&(self.taker_scores.len() as u64).to_le_bytes());
@@ -224,69 +224,69 @@ impl SharedReplicatedLedger {
     pub fn get_block_relevant_state(&self, txs: &[Transaction]) -> BlockRelevantState {
         let mut touched_accounts = Vec::new();
         let mut touched_assets = Vec::new();
-        let mut touched_nfts = Vec::new();
+        let mut touched_ledgers = Vec::new();
         for tx in txs {
             match tx {
-                Transaction::Deposit { from, asset_id, target_nft_id, .. } => {
+                Transaction::Deposit { from, asset_id, target_ledger_id, .. } => {
                     touched_accounts.push(*from);
                     touched_assets.push(*asset_id);
-                    if let Some(nft_id) = target_nft_id {
-                        touched_nfts.push(*nft_id);
+                    if let Some(ledger_id) = target_ledger_id {
+                        touched_ledgers.push(*ledger_id);
                     }
                 }
-                Transaction::Loan { borrower, nft_id, currency_id, .. } => {
+                Transaction::Loan { borrower, ledger_id, currency_id, .. } => {
                     touched_accounts.push(*borrower);
-                    touched_nfts.push(*nft_id);
+                    touched_ledgers.push(*ledger_id);
                     touched_assets.push(*currency_id);
                 }
-                Transaction::Repay { borrower, nft_id, .. } => {
+                Transaction::Repay { borrower, ledger_id, .. } => {
                     touched_accounts.push(*borrower);
-                    touched_nfts.push(*nft_id);
+                    touched_ledgers.push(*ledger_id);
                 }
-                Transaction::Liquidate { nft_id, liquidator, .. } => {
+                Transaction::Liquidate { ledger_id, liquidator, .. } => {
                     touched_accounts.push(*liquidator);
-                    touched_nfts.push(*nft_id);
+                    touched_ledgers.push(*ledger_id);
                 }
-                Transaction::NftTransfer { from, to, nft_id, .. } => {
+                Transaction::LedgerTransfer { from, to, ledger_id, .. } => {
                     touched_accounts.push(*from);
                     touched_accounts.push(*to);
-                    touched_nfts.push(*nft_id);
+                    touched_ledgers.push(*ledger_id);
                 }
-                Transaction::ArbBorrow { arbitrageur, debt_nft_id, pool_id, .. } => {
+                Transaction::ArbBorrow { arbitrageur, debt_ledger_id, pool_id, .. } => {
                     touched_accounts.push(*arbitrageur);
-                    touched_nfts.push(*debt_nft_id);
-                    touched_nfts.push(*pool_id);
+                    touched_ledgers.push(*debt_ledger_id);
+                    touched_ledgers.push(*pool_id);
                 }
-                Transaction::DepositorWithdraw { depositor, nft_id, .. } => {
+                Transaction::DepositorWithdraw { depositor, ledger_id, .. } => {
                     touched_accounts.push(*depositor);
-                    touched_nfts.push(*nft_id);
+                    touched_ledgers.push(*ledger_id);
                 }
                 Transaction::PlaceBountyBid { bidder, .. } => {
                     touched_accounts.push(*bidder);
                 }
-                Transaction::YieldSplitFreeze { depositor, nft_id, .. } => {
+                Transaction::YieldSplitFreeze { depositor, ledger_id, .. } => {
                     touched_accounts.push(*depositor);
-                    touched_nfts.push(*nft_id);
+                    touched_ledgers.push(*ledger_id);
                 }
-                Transaction::SetMinimumYieldSplitters { depositor, nft_id, .. } => {
+                Transaction::SetMinimumYieldSplitters { depositor, ledger_id, .. } => {
                     touched_accounts.push(*depositor);
-                    touched_nfts.push(*nft_id);
+                    touched_ledgers.push(*ledger_id);
                 }
-                Transaction::YieldSplitVote { voter, nft_id, .. } => {
+                Transaction::YieldSplitVote { voter, ledger_id, .. } => {
                     touched_accounts.push(*voter);
-                    touched_nfts.push(*nft_id);
+                    touched_ledgers.push(*ledger_id);
                 }
-                Transaction::NftStarterSale { seller, buyer, nft_id, .. } => {
+                Transaction::LedgerStarterSale { seller, buyer, ledger_id, .. } => {
                     touched_accounts.push(*seller);
                     touched_accounts.push(*buyer);
-                    touched_nfts.push(*nft_id);
+                    touched_ledgers.push(*ledger_id);
                 }
             }
         }
         touched_accounts.sort_by(|a,b| a.0.iter().cmp(b.0.iter()));
         touched_accounts.dedup_by(|a,b| a.0 == b.0);
-        touched_nfts.sort_by(|a,b| a.0.iter().cmp(b.0.iter()));
-        touched_nfts.dedup_by(|a,b| a.0 == b.0);
+        touched_ledgers.sort_by(|a,b| a.0.iter().cmp(b.0.iter()));
+        touched_ledgers.dedup_by(|a,b| a.0 == b.0);
         touched_assets.sort_by(|a,b| a.0.iter().cmp(b.0.iter()));
         touched_assets.dedup_by(|a,b| a.0 == b.0);
         
@@ -294,7 +294,7 @@ impl SharedReplicatedLedger {
         for acc in &touched_accounts {
             leaves.push(Hash(blake3::hash(&acc.0).into()));
         }
-        for nft in &touched_nfts {
+        for nft in &touched_ledgers {
             leaves.push(Hash(blake3::hash(&nft.0).into()));
         }
         if leaves.is_empty() {
@@ -305,7 +305,7 @@ impl SharedReplicatedLedger {
             height: BlockHeight(self.blocks.len() as u64),
             touched_accounts,
             touched_assets,
-            touched_nfts,
+            touched_ledgers,
             state_roots: HashMap::new(),
             merkle_tree: MerkleTree::new(leaves),
         }
@@ -353,7 +353,7 @@ impl SharedReplicatedLedger {
                     if let Some(b) = self.bounties.get_mut(&id) {
                         b.winner = Some(winner);
                         b.winning_bid = Some(h.amount);
-                        b.status = pasion_debt_nft::BountyStatus::Settled;
+                        b.status = pasion_debt_ledger::BountyStatus::Settled;
                     }
                 }
             } else {
@@ -380,7 +380,7 @@ impl SharedReplicatedLedger {
                 let burn_remaining = Amount(original_amount.0.saturating_sub(dist_total.0));
                 if let Some(b) = self.bounties.get_mut(&id) {
                     b.burn_remaining = burn_remaining;
-                    b.status = pasion_debt_nft::BountyStatus::ExpiredNoBids;
+                    b.status = pasion_debt_ledger::BountyStatus::ExpiredNoBids;
                 }
                 self.adjust_lender_score(reward_wallet, -10);
             }
@@ -389,7 +389,7 @@ impl SharedReplicatedLedger {
 
     pub fn process_timed_burn<H: Into<BlockHeight>>(&mut self, height: H) {
         let height = height.into();
-        let ids: Vec<BountyId> = self.bounties.iter().filter(|(_, b)| b.status == pasion_debt_nft::BountyStatus::ExpiredNoBids && b.burn_remaining.0 > 0).map(|(id, _)| *id).collect();
+        let ids: Vec<BountyId> = self.bounties.iter().filter(|(_, b)| b.status == pasion_debt_ledger::BountyStatus::ExpiredNoBids && b.burn_remaining.0 > 0).map(|(id, _)| *id).collect();
         for id in ids {
             let currency_id = {
                 let b = self.bounties.get(&id).unwrap();
@@ -411,7 +411,7 @@ impl SharedReplicatedLedger {
                 if let Some(b) = self.bounties.get_mut(&id) {
                     b.burn_remaining.0 = b.burn_remaining.0.saturating_sub(burn_amt);
                     if b.burn_remaining.0 == 0 {
-                        b.status = pasion_debt_nft::BountyStatus::Burned;
+                        b.status = pasion_debt_ledger::BountyStatus::Burned;
                     }
                 }
             }

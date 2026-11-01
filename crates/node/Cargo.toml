@@ -13,7 +13,7 @@ pasion-core = { path = "../core" }
 pasion-consensus = { path = "../consensus" }
 pasion-ledger = { path = "../ledger" }
 pasion-assets = { path = "../assets" }
-pasion-debt-nft = { path = "../debt-nft" }
+pasion-debt-ledger = { path = "../debt-ledger" }
 pasion-liquidation = { path = "../liquidation" }
 pasion-vm = { path = "../vm" }
 pasion-bridge = { path = "../bridge" }

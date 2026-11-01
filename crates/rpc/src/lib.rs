@@ -61,8 +61,8 @@ impl RpcServer {
                 error: None,
                 id: req.id,
             },
-            "pasion_getNft" => RpcResponse {
-                result: Some(serde_json::json!({"nft": null})),
+            "pasion_getLedger" => RpcResponse {
+                result: Some(serde_json::json!({"ledger": null})),
                 error: None,
                 id: req.id,
             },

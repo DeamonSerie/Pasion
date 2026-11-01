@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-use pasion_types::{Address, Amount, AssetId, BlockHeight, NftId, TxId};
+use pasion_types::{Address, Amount, AssetId, BlockHeight, LedgerId, TxId};
 pub use pasion_types::BountyId;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum NftStatus {
+pub enum LedgerStatus {
     Active,
     Liquidating,
     Burned,
@@ -12,7 +12,7 @@ pub enum NftStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoanRef {
-    pub loan_id: NftId,
+    pub loan_id: LedgerId,
     pub loaner: Address,
 }
 
@@ -110,7 +110,7 @@ pub struct BountyBid {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bounty {
     pub id: BountyId,
-    pub source_nft_id: NftId,
+    pub source_ledger_id: LedgerId,
     pub reward_wallet: Address,
     pub currency_id: AssetId,
     pub original_amount: Amount,
@@ -197,7 +197,7 @@ pub enum DebtEvent {
     },
     LoanObligationAdjusted {
         tx_id: TxId,
-        loan_id: NftId,
+        loan_id: LedgerId,
         loaner: Address,
         original_obligation: Amount,
         adjusted_obligation: Amount,
@@ -256,8 +256,8 @@ pub enum DebtEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DebtNft {
-    pub id: NftId,
+pub struct DebtLedger {
+    pub id: LedgerId,
     pub owner: Address,
     pub depositor: Address,
     pub collateral_asset: AssetId,
@@ -268,9 +268,9 @@ pub struct DebtNft {
     pub interest_rate_bps: u32,
     pub interest_pool: Amount,
     pub created_at_height: BlockHeight,
-    pub status: NftStatus,
+    pub status: LedgerStatus,
     pub value_factor: f64,
-    pub total_minted_from_nft: Amount,
+    pub total_minted_from_ledger: Amount,
     pub deposit_loanability: Amount,
     pub available_collateral_backing: Amount,
     pub dealing_currencies: Vec<(AssetId, Amount)>,
@@ -302,9 +302,9 @@ pub struct DebtNft {
     pub yield_splitter_pending: std::collections::HashMap<Address, Amount>,
 }
 
-impl DebtNft {
+impl DebtLedger {
     pub fn new(
-        id: NftId,
+        id: LedgerId,
         owner: Address,
         collateral_asset: AssetId,
         deposit_amount: Amount,
@@ -312,7 +312,7 @@ impl DebtNft {
         interest_rate_bps: u32,
         height: BlockHeight,
     ) -> Self {
-        DebtNft {
+        DebtLedger {
             id,
             owner,
             depositor: owner,
@@ -324,9 +324,9 @@ impl DebtNft {
             interest_rate_bps,
             interest_pool: Amount(0),
             created_at_height: height,
-            status: NftStatus::Active,
+            status: LedgerStatus::Active,
             value_factor: 1.0,
-            total_minted_from_nft: Amount(0),
+            total_minted_from_ledger: Amount(0),
             deposit_loanability: Amount(deposit_amount.0 * 70 / 100),
             available_collateral_backing: deposit_amount,
             dealing_currencies: Vec::new(),
@@ -396,11 +396,11 @@ impl DebtNft {
     }
     
     pub fn update_value_factor(&mut self) {
-        if self.total_minted_from_nft.0 == 0 {
+        if self.total_minted_from_ledger.0 == 0 {
             self.value_factor = 1.0;
         } else {
             self.value_factor = (self.available_collateral_backing.0 as f64) 
-                / (self.total_minted_from_nft.0 as f64);
+                / (self.total_minted_from_ledger.0 as f64);
             if self.value_factor < 0.0 {
                 self.value_factor = 0.0;
             }
@@ -417,7 +417,7 @@ impl DebtNft {
     }
     
     pub fn burn(&mut self, reason: String, height: BlockHeight) {
-        self.status = NftStatus::Burned;
+        self.status = LedgerStatus::Burned;
         self.can_be_transferred = false;
         let dealing_currencies_burned = self.dealing_currencies.clone();
         self.dealing_currencies.clear();

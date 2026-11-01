@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 pasion-types = { path = "../types" }
 pasion-core = { path = "../core" }
-pasion-debt-nft = { path = "../debt-nft" }
+pasion-debt-ledger = { path = "../debt-ledger" }
 serde = { workspace = true }
 bincode = { workspace = true }
 thiserror = { workspace = true }

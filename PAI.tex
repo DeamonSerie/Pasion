@@ -481,7 +481,7 @@ After the repayment count is incremented, if the new count is a multiple of six 
 The recurring distribution is an internal PAI transfer between accounts; PAI supply is unchanged. The taker-score adjustment is bounded between $0$ and $100$ and keeps both \texttt{taker\_score} and \texttt{taker\_scores} in sync. The six-repayment cadence and ten-percent share are fixed by protocol constants.
 
 \subsection{Freeze Enforcement}
-While an instrument is frozen for yield-split governance, no transaction may touch it. Specifically, \texttt{Repay}, \texttt{NftTransfer}, \texttt{DepositorWithdraw}, and \texttt{Liquidate} operations return \texttt{NftFrozen} if the target instrument exists and is frozen, before any state mutation. This guarantees that governance completes without concurrent economic activity on the instrument.
+While an instrument is frozen for yield-split governance, no transaction may touch it. Specifically, \texttt{Repay}, \texttt{LedgerTransfer}, \texttt{DepositorWithdraw}, and \texttt{Liquidate} operations return \texttt{LedgerFrozen} if the target instrument exists and is frozen, before any state mutation. This guarantees that governance completes without concurrent economic activity on the instrument.
 
 \subsection{Depositor Freeze and Minimum Splitter Count}
 The original depositor may freeze an active, non-burned instrument by submitting a \texttt{YieldSplitFreeze} transaction. The instrument must not already be frozen and the submitter must be the depositor. Freezing sets \texttt{frozen = true} and records a \texttt{YieldSplitFrozen} event.
@@ -514,7 +514,7 @@ The instrument also exposes \texttt{is\_yield\_splitter(address)}.
 
 New debt events: \texttt{YieldSplitterAdded}, \texttt{YieldSplitFrozen}, \texttt{MinimumYieldSplittersSet}, \texttt{YieldSplitPercentageVoted}, \texttt{YieldSplitEstablished}, \texttt{YieldSplitPaid}, and \texttt{YieldSplitDistribution}.
 
-New transactions: \texttt{YieldSplitFreeze}, \texttt{SetMinimumYieldSplitters}, and \texttt{YieldSplitVote}. Block-relevant state construction touches the depositor or voter account and the instrument for each. A new error, \texttt{NftFrozen}, signals that an operation was rejected because the instrument is frozen.
+New transactions: \texttt{YieldSplitFreeze}, \texttt{SetMinimumYieldSplitters}, and \texttt{YieldSplitVote}. Block-relevant state construction touches the depositor or voter account and the instrument for each. A new error, \texttt{LedgerFrozen}, signals that an operation was rejected because the instrument is frozen.
 
 \subsection{Protocol Constants}
 \begin{itemize}

@@ -1,5 +1,5 @@
 [package]
-name = "pasion-debt-nft"
+name = "pasion-debt-ledger"
 version.workspace = true
 edition.workspace = true
 

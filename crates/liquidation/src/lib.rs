@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
-use pasion_types::{Address, Amount, NftId, BlockHeight};
+use pasion_types::{Address, Amount, LedgerId, BlockHeight};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LiquidationPool {
-    pub id: NftId, // Provider NFT for the pool
-    pub provider_nft: NftId,
+    pub id: LedgerId, // Provider NFT for the pool
+    pub provider_ledger: LedgerId,
     pub total_deposits: Amount,
     pub total_shares: Amount,
     pub interest_rate_bps: u32,
@@ -17,9 +17,9 @@ pub struct LiquidationPool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArbitragePosition {
     pub arbitrageur: Address,
-    pub debt_nft_id: NftId,
+    pub debt_ledger_id: LedgerId,
     pub borrowed_amount: Amount,
-    pub temp_nft_id: NftId,
+    pub temp_ledger_id: LedgerId,
     pub started_at_height: BlockHeight,
     pub repaid: bool,
     pub profit_retained: bool,
@@ -27,10 +27,10 @@ pub struct ArbitragePosition {
 }
 
 impl LiquidationPool {
-    pub fn new(id: NftId, provider_nft: NftId) -> Self {
+    pub fn new(id: LedgerId, provider_ledger: LedgerId) -> Self {
         LiquidationPool {
             id,
-            provider_nft,
+            provider_ledger,
             total_deposits: Amount(0),
             total_shares: Amount(0),
             interest_rate_bps: 500,
@@ -63,24 +63,24 @@ impl LiquidationPool {
         }
     }
     
-    pub fn assign_debt_to_arb(&mut self, arbitrageur: Address, debt_nft_id: NftId, borrowed_amount: Amount, height: BlockHeight) -> NftId {
-        let temp_nft_id = NftId(blake3::hash(&[arbitrageur.0.as_slice(), debt_nft_id.0.as_slice()].concat()).into());
+    pub fn assign_debt_to_arb(&mut self, arbitrageur: Address, debt_ledger_id: LedgerId, borrowed_amount: Amount, height: BlockHeight) -> LedgerId {
+        let temp_ledger_id = LedgerId(blake3::hash(&[arbitrageur.0.as_slice(), debt_ledger_id.0.as_slice()].concat()).into());
         let pos = ArbitragePosition {
             arbitrageur,
-            debt_nft_id,
+            debt_ledger_id,
             borrowed_amount,
-            temp_nft_id,
+            temp_ledger_id,
             started_at_height: height,
             repaid: false,
             profit_retained: false,
             debt_assigned: true,
         };
         self.active_arbs.push(pos);
-        temp_nft_id
+        temp_ledger_id
     }
     
-    pub fn repay_arb(&mut self, temp_nft_id: NftId, repaid_full: bool) -> bool {
-        if let Some(pos) = self.active_arbs.iter_mut().find(|p| p.temp_nft_id == temp_nft_id) {
+    pub fn repay_arb(&mut self, temp_ledger_id: LedgerId, repaid_full: bool) -> bool {
+        if let Some(pos) = self.active_arbs.iter_mut().find(|p| p.temp_ledger_id == temp_ledger_id) {
             if repaid_full {
                 pos.repaid = true;
                 pos.profit_retained = true;

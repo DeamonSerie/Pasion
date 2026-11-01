@@ -73,7 +73,7 @@ pub struct Amount(pub u128);
 pub struct AssetId(pub [u8; 32]);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NftId(pub [u8; 32]);
+pub struct LedgerId(pub [u8; 32]);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TxId(pub [u8; 32]);
@@ -103,7 +103,7 @@ pub enum PasionError {
     #[error("Invalid transaction")]
     InvalidTransaction,
     #[error("NFT not found")]
-    NftNotFound,
+    LedgerNotFound,
     #[error("Debt not paid in full")]
     DebtNotPaidInFull,
     #[error("Liquidation failed")]
@@ -121,7 +121,7 @@ pub enum PasionError {
     #[error("Not in bonded set")]
     NotBonded,
     #[error("Cannot transfer burned NFT")]
-    CannotTransferBurnedNft,
+    CannotTransferBurnedLedger,
     #[error("Must pay debt in full")]
     MustPayDebtInFull,
     #[error("Arbitrage failed")]
@@ -135,7 +135,7 @@ pub enum PasionError {
     #[error("Bounty already settled")]
     BountyAlreadySettled,
     #[error("NFT is frozen for yield-split governance")]
-    NftFrozen,
+    LedgerFrozen,
     #[error("Starter sale not allowed")]
     StarterSaleNotAllowed,
 }

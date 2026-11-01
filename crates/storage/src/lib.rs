@@ -1,5 +1,5 @@
 use pasion_types::{Hash, Result, PasionError};
-use pasion_debt_nft::{Bounty, BountyAuction};
+use pasion_debt_ledger::{Bounty, BountyAuction};
 use pasion_types::BountyId;
 use std::path::Path;
 
@@ -43,14 +43,14 @@ impl Storage {
         }
     }
     
-    pub fn put_nft(&self, nft_id: &[u8], nft_bytes: &[u8]) -> Result<()> {
-        let key = format!("nft:{}", hex::encode(nft_id));
-        self.db.put(key.as_bytes(), nft_bytes)
+    pub fn put_ledger(&self, ledger_id: &[u8], ledger_bytes: &[u8]) -> Result<()> {
+        let key = format!("ledger:{}", hex::encode(ledger_id));
+        self.db.put(key.as_bytes(), ledger_bytes)
             .map_err(|e| PasionError::StorageError(e.to_string()))
     }
     
-    pub fn get_nft(&self, nft_id: &[u8]) -> Result<Option<Vec<u8>>> {
-        let key = format!("nft:{}", hex::encode(nft_id));
+    pub fn get_ledger(&self, ledger_id: &[u8]) -> Result<Option<Vec<u8>>> {
+        let key = format!("ledger:{}", hex::encode(ledger_id));
         match self.db.get(key.as_bytes()) {
             Ok(v) => Ok(v),
             Err(e) => Err(PasionError::StorageError(e.to_string())),

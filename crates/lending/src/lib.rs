@@ -1,4 +1,4 @@
-use pasion_types::{Amount, NftId, BlockHeight, Address};
+use pasion_types::{Amount, LedgerId, BlockHeight, Address};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,8 +11,8 @@ pub enum LoanAdjustmentState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Loan {
-    pub loan_id: NftId,
-    pub nft_id: NftId,
+    pub loan_id: LedgerId,
+    pub ledger_id: LedgerId,
     pub borrower: Address,
     pub amount: Amount,
     pub interest_rate_bps: u32,
@@ -29,10 +29,10 @@ pub struct Loan {
 }
 
 impl Loan {
-    pub fn new(loan_id: NftId, nft_id: NftId, borrower: Address, amount: Amount, interest_rate_bps: u32, height: BlockHeight) -> Self {
+    pub fn new(loan_id: LedgerId, ledger_id: LedgerId, borrower: Address, amount: Amount, interest_rate_bps: u32, height: BlockHeight) -> Self {
         Loan {
             loan_id,
-            nft_id,
+            ledger_id,
             borrower,
             amount,
             interest_rate_bps,

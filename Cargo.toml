@@ -7,7 +7,7 @@ members = [
     "crates/consensus",
     "crates/ledger",
     "crates/assets",
-    "crates/debt-nft",
+    "crates/debt-ledger",
     "crates/lending",
     "crates/liquidation",
     "crates/bridge",
