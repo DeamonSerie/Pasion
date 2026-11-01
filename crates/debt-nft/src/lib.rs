@@ -136,6 +136,12 @@ pub enum DebtEvent {
         amount: Amount,
         height: BlockHeight,
     },
+    DepositConsistencyInterest {
+        tx_id: TxId,
+        amount: Amount,
+        consistency_score: f64,
+        height: BlockHeight,
+    },
     LoanIssued {
         tx_id: TxId,
         amount: Amount,

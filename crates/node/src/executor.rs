@@ -47,6 +47,23 @@ impl Executor {
                 nft.deposit_loanability = Amount(nft.deposit_loanability.0.saturating_add(new_loanable.0));
                 nft.interest_pool = Amount(nft.interest_pool.0.saturating_add(interest_add.0));
                 nft.available_collateral_backing = Amount(nft.available_collateral_backing.0.saturating_add(amount.0.saturating_sub(new_loanable.0)));
+                let consistency_score = if !nft.affected_loans.is_empty() {
+                    let total = nft.affected_loans.len() as f64;
+                    let repaid = nft.affected_loans.iter().filter(|al| al.paid_at_start.0 > 0).count() as f64;
+                    if total > 0.0 { repaid / total } else { 0.0 }
+                } else {
+                    let total = nft.cumulative_repaid.0.saturating_add(nft.debt_balance.0);
+                    if total > 0 { nft.cumulative_repaid.0 as f64 / total as f64 } else { 0.0 }
+                };
+                let consistency_bps = (consistency_score * 10000.0).round() as u128;
+                let interest_bonus = Amount(interest_add.0 * consistency_bps / 10000);
+                nft.deposit_interest_accrued = Amount(nft.deposit_interest_accrued.0.saturating_add(interest_bonus.0));
+                nft.add_debt_event(DebtEvent::DepositConsistencyInterest {
+                    tx_id: *tx_id,
+                    amount: interest_bonus,
+                    consistency_score,
+                    height,
+                });
                 nft.add_debt_event(DebtEvent::Deposit { tx_id: *tx_id, amount: *amount, height });
                 nft.update_value_factor();
             } else {
@@ -1237,6 +1254,104 @@ mod tests {
         assert_eq!(nft.deposit_loanability, Amount(70));
         assert_eq!(nft.total_minted_from_nft, Amount(70));
         assert!(nft.debt_history.iter().any(|e| matches!(e, DebtEvent::LoanabilityReset { .. })));
+    }
+
+    #[test]
+    fn targeted_deposit_consistency_full() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let mut nft = DebtNft::new(nft_id, depositor, asset, Amount(100), asset, 500, BlockHeight(0));
+        nft.deposit_amount = Amount(100);
+        nft.deposit_loanability = Amount(70);
+        nft.interest_pool = Amount(10);
+        nft.available_collateral_backing = Amount(30);
+        nft.update_value_factor();
+        nft.affected_loans.push(AffectedLoan {
+            loan_ref: LoanRef { loan_id: NftId([5u8;32]), loaner: Address([6u8;32]) },
+            loaner: Address([6u8;32]),
+            original_obligation: Amount(50),
+            paid_at_start: Amount(10),
+            adjusted_obligation: Amount(0),
+            obligation_status: ObligationStatus::Active,
+            released: false,
+        });
+        ledger.nfts.insert(nft_id, nft);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: depositor, asset_id: asset, amount: Amount(50), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        Executor::execute_deposit(&mut ledger, &tx).unwrap();
+        let nft = ledger.nfts.get(&nft_id).unwrap();
+        // bonus = 50*10/100 * 1.0 = 5
+        assert_eq!(nft.deposit_interest_accrued, Amount(5));
+        assert!(nft.debt_history.iter().any(|e| matches!(e, DebtEvent::DepositConsistencyInterest { .. })));
+    }
+
+    #[test]
+    fn targeted_deposit_consistency_partial() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let mut nft = DebtNft::new(nft_id, depositor, asset, Amount(100), asset, 500, BlockHeight(0));
+        nft.deposit_amount = Amount(100);
+        nft.update_value_factor();
+        nft.affected_loans.push(AffectedLoan {
+            loan_ref: LoanRef { loan_id: NftId([5u8;32]), loaner: Address([6u8;32]) },
+            loaner: Address([6u8;32]),
+            original_obligation: Amount(50),
+            paid_at_start: Amount(10),
+            adjusted_obligation: Amount(0),
+            obligation_status: ObligationStatus::Active,
+            released: false,
+        });
+        nft.affected_loans.push(AffectedLoan {
+            loan_ref: LoanRef { loan_id: NftId([8u8;32]), loaner: Address([9u8;32]) },
+            loaner: Address([9u8;32]),
+            original_obligation: Amount(50),
+            paid_at_start: Amount(0),
+            adjusted_obligation: Amount(0),
+            obligation_status: ObligationStatus::Active,
+            released: false,
+        });
+        ledger.nfts.insert(nft_id, nft);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: depositor, asset_id: asset, amount: Amount(100), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        Executor::execute_deposit(&mut ledger, &tx).unwrap();
+        let nft = ledger.nfts.get(&nft_id).unwrap();
+        // interest_add = 100*10/100=10; score=0.5; bonus=5
+        assert_eq!(nft.deposit_interest_accrued, Amount(5));
+    }
+
+    #[test]
+    fn targeted_deposit_consistency_no_history_cumulative() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let mut nft = DebtNft::new(nft_id, depositor, asset, Amount(100), asset, 500, BlockHeight(0));
+        nft.deposit_amount = Amount(100);
+        nft.cumulative_repaid = Amount(30);
+        nft.debt_balance = Amount(70);
+        nft.update_value_factor();
+        ledger.nfts.insert(nft_id, nft);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: depositor, asset_id: asset, amount: Amount(100), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        Executor::execute_deposit(&mut ledger, &tx).unwrap();
+        let nft = ledger.nfts.get(&nft_id).unwrap();
+        // score = 30/(30+70)=0.3; interest_add=10; bonus=3
+        assert_eq!(nft.deposit_interest_accrued, Amount(3));
+    }
+
+    #[test]
+    fn targeted_deposit_consistency_none() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let nft = DebtNft::new(nft_id, depositor, asset, Amount(100), asset, 500, BlockHeight(0));
+        ledger.nfts.insert(nft_id, nft);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: depositor, asset_id: asset, amount: Amount(50), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        Executor::execute_deposit(&mut ledger, &tx).unwrap();
+        let nft = ledger.nfts.get(&nft_id).unwrap();
+        assert_eq!(nft.deposit_interest_accrued, Amount(0));
     }
 
     #[test]
