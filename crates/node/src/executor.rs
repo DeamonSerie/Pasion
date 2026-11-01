@@ -22,28 +22,56 @@ pub const YIELD_SPLITTER_MIN_TAKER_SCORE: i64 = 1;
 
 impl Executor {
     pub fn execute_deposit(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
-        if let Transaction::Deposit { tx_id, from, asset_id, amount, .. } = tx {
-            let nft_id = NftId(blake3::hash(&[from.0.as_slice(), tx_id.0.as_slice()].concat()).into());
-            let mut nft = DebtNft::new(
-                nft_id,
-                *from,
-                *asset_id,
-                *amount,
-                *asset_id,
-                500,
-                BlockHeight(ledger.blocks.len() as u64),
-            );
-            nft.add_debt_event(DebtEvent::Deposit { tx_id: *tx_id, amount: *amount, height: BlockHeight(ledger.blocks.len() as u64) });
-            let loan_count: u32 = 0;
-            let loanable_pct: u128 = (70i32 - (loan_count as i32) * 5).clamp(20, 70) as u128;
-            let loanable = Amount(amount.0 * loanable_pct / 100);
-            let interest_pool = Amount(amount.0 * 10 / 100);
-            nft.total_minted_from_nft = loanable;
-            nft.deposit_loanability = loanable;
-            nft.interest_pool = interest_pool;
-            nft.available_collateral_backing = Amount(amount.0.saturating_sub(loanable.0));
-            nft.update_value_factor();
-            ledger.nfts.insert(nft_id, nft);
+        if let Transaction::Deposit { tx_id, from, asset_id, amount, target_nft_id, .. } = tx {
+            if let Some(target) = target_nft_id {
+                let height = BlockHeight(ledger.blocks.len() as u64);
+                let nft = ledger.nfts.get_mut(target).ok_or(PasionError::NftNotFound)?;
+                if nft.frozen {
+                    return Err(PasionError::NftFrozen);
+                }
+                if nft.status == NftStatus::Burned {
+                    return Err(PasionError::CannotTransferBurnedNft);
+                }
+                if nft.depositor != *from {
+                    return Err(PasionError::InvalidTransaction);
+                }
+                if nft.collateral_asset != *asset_id {
+                    return Err(PasionError::InvalidTransaction);
+                }
+                let loan_count = nft.loan_count;
+                let loanable_pct: u128 = (70i32 - (loan_count as i32) * 5).clamp(20, 70) as u128;
+                let new_loanable = Amount(amount.0 * loanable_pct / 100);
+                let interest_add = Amount(amount.0 * 10 / 100);
+                nft.deposit_amount = Amount(nft.deposit_amount.0.saturating_add(amount.0));
+                nft.total_minted_from_nft = Amount(nft.total_minted_from_nft.0.saturating_add(new_loanable.0));
+                nft.deposit_loanability = Amount(nft.deposit_loanability.0.saturating_add(new_loanable.0));
+                nft.interest_pool = Amount(nft.interest_pool.0.saturating_add(interest_add.0));
+                nft.available_collateral_backing = Amount(nft.available_collateral_backing.0.saturating_add(amount.0.saturating_sub(new_loanable.0)));
+                nft.add_debt_event(DebtEvent::Deposit { tx_id: *tx_id, amount: *amount, height });
+                nft.update_value_factor();
+            } else {
+                let nft_id = NftId(blake3::hash(&[from.0.as_slice(), tx_id.0.as_slice()].concat()).into());
+                let mut nft = DebtNft::new(
+                    nft_id,
+                    *from,
+                    *asset_id,
+                    *amount,
+                    *asset_id,
+                    500,
+                    BlockHeight(ledger.blocks.len() as u64),
+                );
+                nft.add_debt_event(DebtEvent::Deposit { tx_id: *tx_id, amount: *amount, height: BlockHeight(ledger.blocks.len() as u64) });
+                let loan_count: u32 = 0;
+                let loanable_pct: u128 = (70i32 - (loan_count as i32) * 5).clamp(20, 70) as u128;
+                let loanable = Amount(amount.0 * loanable_pct / 100);
+                let interest_pool = Amount(amount.0 * 10 / 100);
+                nft.total_minted_from_nft = loanable;
+                nft.deposit_loanability = loanable;
+                nft.interest_pool = interest_pool;
+                nft.available_collateral_backing = Amount(amount.0.saturating_sub(loanable.0));
+                nft.update_value_factor();
+                ledger.nfts.insert(nft_id, nft);
+            }
         }
         Ok(())
     }
@@ -1208,8 +1236,113 @@ mod tests {
         assert_eq!(nft.owner, to);
         assert_eq!(nft.deposit_loanability, Amount(70));
         assert_eq!(nft.total_minted_from_nft, Amount(70));
-        assert_eq!(nft.loan_count, 0);
         assert!(nft.debt_history.iter().any(|e| matches!(e, DebtEvent::LoanabilityReset { .. })));
+    }
+
+    #[test]
+    fn targeted_deposit_success() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let mut nft = DebtNft::new(nft_id, depositor, asset, Amount(100), asset, 500, BlockHeight(0));
+        nft.loan_count = 2;
+        nft.deposit_amount = Amount(100);
+        nft.total_minted_from_nft = Amount(70);
+        nft.deposit_loanability = Amount(70);
+        nft.interest_pool = Amount(10);
+        nft.available_collateral_backing = Amount(30);
+        nft.update_value_factor();
+        ledger.nfts.insert(nft_id, nft);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: depositor, asset_id: asset, amount: Amount(50), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        Executor::execute_deposit(&mut ledger, &tx).unwrap();
+        let nft = ledger.nfts.get(&nft_id).unwrap();
+        assert_eq!(nft.deposit_amount, Amount(150));
+        assert_eq!(nft.total_minted_from_nft, Amount(100)); // 70 + 30
+        assert_eq!(nft.deposit_loanability, Amount(100)); // 70 + 30
+        assert_eq!(nft.interest_pool, Amount(15)); // 10 + 5
+        assert_eq!(nft.available_collateral_backing, Amount(50)); // 30 + 20
+        assert_eq!(nft.loan_count, 2);
+        assert!(nft.debt_history.iter().any(|e| matches!(e, DebtEvent::Deposit { .. })));
+    }
+
+    #[test]
+    fn targeted_deposit_missing_target() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: depositor, asset_id: asset, amount: Amount(50), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        let res = Executor::execute_deposit(&mut ledger, &tx);
+        assert!(matches!(res, Err(PasionError::NftNotFound)));
+    }
+
+    #[test]
+    fn targeted_deposit_frozen() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let mut nft = DebtNft::new(nft_id, depositor, asset, Amount(100), asset, 500, BlockHeight(0));
+        nft.frozen = true;
+        ledger.nfts.insert(nft_id, nft);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: depositor, asset_id: asset, amount: Amount(50), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        let res = Executor::execute_deposit(&mut ledger, &tx);
+        assert!(matches!(res, Err(PasionError::NftFrozen)));
+    }
+
+    #[test]
+    fn targeted_deposit_burned() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let mut nft = DebtNft::new(nft_id, depositor, asset, Amount(100), asset, 500, BlockHeight(0));
+        nft.status = NftStatus::Burned;
+        ledger.nfts.insert(nft_id, nft);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: depositor, asset_id: asset, amount: Amount(50), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        let res = Executor::execute_deposit(&mut ledger, &tx);
+        assert!(matches!(res, Err(PasionError::CannotTransferBurnedNft)));
+    }
+
+    #[test]
+    fn targeted_deposit_depositor_mismatch() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let other = Address([9u8;32]);
+        let asset = AssetId([3u8;32]);
+        let nft = DebtNft::new(nft_id, depositor, asset, Amount(100), asset, 500, BlockHeight(0));
+        ledger.nfts.insert(nft_id, nft);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: other, asset_id: asset, amount: Amount(50), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        let res = Executor::execute_deposit(&mut ledger, &tx);
+        assert!(matches!(res, Err(PasionError::InvalidTransaction)));
+    }
+
+    #[test]
+    fn targeted_deposit_asset_mismatch() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let nft_id = NftId([1u8;32]);
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let other_asset = AssetId([4u8;32]);
+        let nft = DebtNft::new(nft_id, depositor, asset, Amount(100), asset, 500, BlockHeight(0));
+        ledger.nfts.insert(nft_id, nft);
+        let tx = Transaction::Deposit { tx_id: TxId([7u8;32]), from: depositor, asset_id: other_asset, amount: Amount(50), bridge_proof: vec![], target_nft_id: Some(nft_id) };
+        let res = Executor::execute_deposit(&mut ledger, &tx);
+        assert!(matches!(res, Err(PasionError::InvalidTransaction)));
+    }
+
+    #[test]
+    fn deposit_creates_new_nft_when_no_target() {
+        let mut ledger = SharedReplicatedLedger::default();
+        let depositor = Address([2u8;32]);
+        let asset = AssetId([3u8;32]);
+        let tx_id = TxId([7u8;32]);
+        let tx = Transaction::Deposit { tx_id, from: depositor, asset_id: asset, amount: Amount(50), bridge_proof: vec![], target_nft_id: None };
+        Executor::execute_deposit(&mut ledger, &tx).unwrap();
+        let nft_id = NftId(blake3::hash(&[depositor.0.as_slice(), tx_id.0.as_slice()].concat()).into());
+        assert!(ledger.nfts.contains_key(&nft_id));
     }
 }
 

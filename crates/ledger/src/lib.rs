@@ -62,6 +62,8 @@ pub enum Transaction {
         asset_id: AssetId,
         amount: Amount,
         bridge_proof: Vec<u8>,
+        #[serde(default)]
+        target_nft_id: Option<NftId>,
     },
     Loan {
         tx_id: TxId,
@@ -225,9 +227,12 @@ impl SharedReplicatedLedger {
         let mut touched_nfts = Vec::new();
         for tx in txs {
             match tx {
-                Transaction::Deposit { from, asset_id, .. } => {
+                Transaction::Deposit { from, asset_id, target_nft_id, .. } => {
                     touched_accounts.push(*from);
                     touched_assets.push(*asset_id);
+                    if let Some(nft_id) = target_nft_id {
+                        touched_nfts.push(*nft_id);
+                    }
                 }
                 Transaction::Loan { borrower, nft_id, currency_id, .. } => {
                     touched_accounts.push(*borrower);
