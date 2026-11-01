@@ -180,6 +180,22 @@ Targeted deposits are subject to the following validity conditions:
 
 For a targeted deposit, the incremental loanable portion is computed using the target instrument's current loan count, so instruments that have already been used for lending accrue additional loanability at the reduced rate. The instrument's identity, owner, depositor, interest rate, and creation height remain unchanged; only the deposit-derived amounts, event history, and value factor are updated. The target instrument is included in the block-relevant state for the transaction, ensuring validators and producers reference the affected instrument during attestation.
 
+In addition to the standard interest-pool contribution, a targeted deposit credits the instrument's \texttt{deposit\_interest\_accrued} with a consistency-based bonus. The payment-consistency score is computed from the target instrument's repayment history:
+\begin{equation}
+\text{consistency\_score} =
+\begin{cases}
+\frac{\#\{\text{affected loans with paid\_at\_start} > 0\}}{\#\{\text{affected loans}\}}, & \text{if affected loans exist},\\
+\frac{\text{cumulative\_repaid}}{\text{cumulative\_repaid} + \text{debt\_balance}}, & \text{if cumulative\_repaid + debt\_balance} > 0,\\
+0, & \text{otherwise}.
+\end{cases}
+\end{equation}
+The bonus is then
+\begin{equation}
+\text{interest\_add} = \text{deposit\_amount} \cdot \frac{10}{100},\quad
+\text{bonus} = \text{interest\_add} \cdot \text{consistency\_score}
+\end{equation}
+with integer rounding down, and is added to \texttt{deposit\_interest\_accrued}. No loaner obligations, affected loans, debt balance, or adjusted obligations are changed; the bonus is funded later through the existing depositor-withdrawal mint path. The event \texttt{DepositConsistencyInterest} records the bonus, score, transaction, and height. Repeated targeted deposits accumulate bonuses independently.
+
 \subsection{Debt Instruments}
 Each deposit generates a unique debt instrument with the following properties:
 \begin{itemize}
@@ -189,6 +205,7 @@ Each deposit generates a unique debt instrument with the following properties:
 \item Tracked debt balance and interest obligations
 \item Value factor determining economic weight
 \item Deposit loanability (\texttt{deposit\_loanability}) recording the deposit-derived loanable amount
+\item Deposit interest accrued (\texttt{deposit\_interest\_accrued}) recording interest credited for future depositor withdrawal, including consistency-based bonuses on targeted deposits
 \item Loan count (\texttt{loan\_count}) tracking loans associated with the instrument
 \item Status indicating active, liquidating, burned, or paid-off state
 \end{itemize}
