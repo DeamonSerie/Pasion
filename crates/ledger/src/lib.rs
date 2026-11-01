@@ -122,6 +122,13 @@ pub enum Transaction {
         voter: Address,
         percentage_bps: u32,
     },
+    NftStarterSale {
+        tx_id: TxId,
+        nft_id: NftId,
+        seller: Address,
+        buyer: Address,
+        accepted: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,6 +269,11 @@ impl SharedReplicatedLedger {
                 }
                 Transaction::YieldSplitVote { voter, nft_id, .. } => {
                     touched_accounts.push(*voter);
+                    touched_nfts.push(*nft_id);
+                }
+                Transaction::NftStarterSale { seller, buyer, nft_id, .. } => {
+                    touched_accounts.push(*seller);
+                    touched_accounts.push(*buyer);
                     touched_nfts.push(*nft_id);
                 }
             }

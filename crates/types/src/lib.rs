@@ -136,6 +136,8 @@ pub enum PasionError {
     BountyAlreadySettled,
     #[error("NFT is frozen for yield-split governance")]
     NftFrozen,
+    #[error("Starter sale not allowed")]
+    StarterSaleNotAllowed,
 }
 
 pub type Result<T> = std::result::Result<T, PasionError>;

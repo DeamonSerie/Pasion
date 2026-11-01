@@ -70,6 +70,7 @@ pub enum ObligationStatus {
     DiscountedToFortyPercent,
     ReleasedNoPay,
     Refunded,
+    PartiallyPaid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +226,20 @@ pub enum DebtEvent {
     YieldSplitEstablished { tx_id: TxId, percentage_bps: u32, height: BlockHeight },
     YieldSplitPaid { tx_id: TxId, splitter: Address, amount: Amount, height: BlockHeight },
     YieldSplitDistribution { tx_id: TxId, depositor: Address, amount: Amount, height: BlockHeight },
+    StarterSaleDenied {
+        tx_id: TxId,
+        seller: Address,
+        buyer: Address,
+        height: BlockHeight,
+    },
+    StarterSaleCompleted {
+        tx_id: TxId,
+        seller: Address,
+        buyer: Address,
+        unpaid_debt: Amount,
+        payment_amount: Amount,
+        height: BlockHeight,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -322,6 +337,11 @@ impl DebtNft {
     
     pub fn add_debt_event(&mut self, event: DebtEvent) {
         self.debt_history.push(event);
+    }
+
+    pub fn most_loans_unpaid(&self) -> bool {
+        let total = self.debt_balance.0.saturating_add(self.cumulative_repaid.0);
+        total > 0 && self.debt_balance.0 * 2 > total
     }
 
     pub fn is_yield_splitter(&self, addr: &Address) -> bool {

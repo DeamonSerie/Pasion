@@ -14,6 +14,7 @@ pub const LENDER_EARLY_WITHDRAWAL_DELTA: i64 = -5;
 pub const LENDER_MATURE_WITH_LOANABILITY_DELTA: i64 = 3;
 pub const LENDER_FAILED_BOUNTY_DELTA: i64 = -10;
 pub const YIELD_SPLIT_DEFAULT_PERCENTAGE_BPS: u32 = 1000;
+pub const STARTER_SALE_PAYMENT_BPS: u32 = 4000;
 pub const YIELD_SPLIT_RECURRING_PERCENT: u64 = 10;
 pub const YIELD_SPLIT_RECURRING_INTERVAL: u32 = 6;
 pub const YIELD_SPLIT_TAKER_DELTA: i64 = 8;
@@ -615,6 +616,253 @@ impl Executor {
         process_timed_burn(ledger, height);
     }
 
+    pub fn execute_nft_starter_sale(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
+        if let Transaction::NftStarterSale { tx_id, nft_id, seller, buyer, accepted } = tx {
+            // frozen check first
+            if ledger.nfts.get(nft_id).map(|n| n.frozen).unwrap_or(false) {
+                return Err(PasionError::NftFrozen);
+            }
+            // lookup
+            {
+                let nft = ledger.nfts.get(nft_id).ok_or(PasionError::NftNotFound)?;
+                if nft.status == NftStatus::Burned {
+                    return Err(PasionError::CannotTransferBurnedNft);
+                }
+                if nft.owner != *seller {
+                    return Err(PasionError::InvalidTransaction);
+                }
+                if !nft.most_loans_unpaid() {
+                    return Err(PasionError::StarterSaleNotAllowed);
+                }
+            }
+            let height = BlockHeight(ledger.blocks.len() as u64);
+
+            if !*accepted {
+                if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                    nft.add_debt_event(DebtEvent::StarterSaleDenied {
+                        tx_id: *tx_id,
+                        seller: *seller,
+                        buyer: *buyer,
+                        height,
+                    });
+                }
+                return Ok(());
+            }
+
+            // compute amounts
+            let unpaid_debt = ledger.nfts.get(nft_id).unwrap().debt_balance;
+            let payment_total = Amount(unpaid_debt.0 * STARTER_SALE_PAYMENT_BPS as u128 / 10000);
+            let share = payment_total.0 / 3;
+            let mut depositor_share = payment_total.0 - 2 * share;
+            let buyer_share = share;
+            let mut loaner_share = share;
+
+            let loaned_currency_id = ledger.nfts.get(nft_id).unwrap().loaned_currency_id;
+            let depositor = ledger.nfts.get(nft_id).unwrap().depositor;
+
+            // Buyer credit
+            let buyer_nfts: Vec<NftId> = ledger.nfts.iter()
+                .filter(|(id, n)| **id != *nft_id && n.owner == *buyer && n.debt_balance.0 > 0)
+                .map(|(id, _)| *id)
+                .collect();
+            if !buyer_nfts.is_empty() {
+                let total_buyer_debt: u128 = buyer_nfts.iter()
+                    .map(|id| ledger.nfts.get(id).unwrap().debt_balance.0)
+                    .sum();
+                if total_buyer_debt > 0 {
+                    for id in buyer_nfts.iter() {
+                        let debt = ledger.nfts.get(id).unwrap().debt_balance.0;
+                        let portion = buyer_share * debt / total_buyer_debt;
+                        if let Some(n) = ledger.nfts.get_mut(id) {
+                            n.debt_balance.0 = n.debt_balance.0.saturating_sub(portion);
+                        }
+                    }
+                }
+            } else if buyer_share > 0 {
+                {
+                    let entry = ledger.assets.entry(loaned_currency_id).or_insert(Amount(0));
+                    entry.0 = entry.0.saturating_add(buyer_share);
+                }
+                {
+                    let acc = ledger.state.entry(*buyer).or_insert_with(|| pasion_ledger::AccountState {
+                        address: *buyer, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
+                    });
+                    acc.balances.entry(loaned_currency_id).and_modify(|e| e.0 += buyer_share).or_insert(Amount(buyer_share));
+                }
+            }
+
+            // Determine unreleased affected loans & denom
+            let (unreleased_indices, denom) = {
+                let nft = ledger.nfts.get(nft_id).unwrap();
+                let mut idxs = Vec::new();
+                for (i, al) in nft.affected_loans.iter().enumerate() {
+                    if !al.released {
+                        idxs.push(i);
+                    }
+                }
+                let d: u128 = idxs.iter().map(|&i| nft.affected_loans[i].original_obligation.0).sum();
+                (idxs, d)
+            };
+
+            let redirect_loaner = unreleased_indices.is_empty() || denom == 0;
+            if redirect_loaner {
+                depositor_share += loaner_share;
+                loaner_share = 0;
+            }
+
+            // Depositor credit
+            if depositor_share > 0 {
+                {
+                    let entry = ledger.assets.entry(loaned_currency_id).or_insert(Amount(0));
+                    entry.0 = entry.0.saturating_add(depositor_share);
+                }
+                {
+                    let acc = ledger.state.entry(depositor).or_insert_with(|| pasion_ledger::AccountState {
+                        address: depositor, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
+                    });
+                    acc.balances.entry(loaned_currency_id).and_modify(|e| e.0 += depositor_share).or_insert(Amount(depositor_share));
+                }
+                if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                    nft.deposit_interest_accrued.0 = nft.deposit_interest_accrued.0.saturating_sub(depositor_share);
+                }
+            }
+
+            // Loaner credit
+            if loaner_share > 0 && !redirect_loaner {
+                // need clone loaner info first
+                let loaner_info: Vec<(usize, Address, u128)> = {
+                    let nft = ledger.nfts.get(nft_id).unwrap();
+                    unreleased_indices.iter().map(|&i| (i, nft.affected_loans[i].loaner, nft.affected_loans[i].original_obligation.0)).collect()
+                };
+                for (i, loaner, orig) in loaner_info {
+                    let portion = if denom > 0 { loaner_share * orig / denom } else { 0 };
+                    if portion > 0 {
+                        {
+                            let entry = ledger.assets.entry(loaned_currency_id).or_insert(Amount(0));
+                            entry.0 = entry.0.saturating_add(portion);
+                        }
+                        {
+                            let acc = ledger.state.entry(loaner).or_insert_with(|| pasion_ledger::AccountState {
+                                address: loaner, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
+                            });
+                            acc.balances.entry(loaned_currency_id).and_modify(|e| e.0 += portion).or_insert(Amount(portion));
+                        }
+                    }
+                    if portion > 0 {
+                        if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                            let al = &mut nft.affected_loans[i];
+                            al.adjusted_obligation.0 = al.adjusted_obligation.0.saturating_sub(portion);
+                            if al.adjusted_obligation.0 == 0 {
+                                al.released = true;
+                                al.obligation_status = ObligationStatus::ReleasedNoPay;
+                            } else {
+                                al.obligation_status = ObligationStatus::PartiallyPaid;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Reduce sold NFT debt
+            if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                nft.debt_balance.0 = nft.debt_balance.0.saturating_sub(payment_total.0);
+                nft.cumulative_repaid.0 = nft.cumulative_repaid.0.saturating_add(payment_total.0);
+            }
+
+            // Loanability reset if seller != buyer
+            if *seller != *buyer {
+                let previous = ledger.nfts.get(nft_id).unwrap().deposit_loanability;
+                let new_loanability = Amount(ledger.nfts.get(nft_id).unwrap().deposit_amount.0 * 70 / 100);
+                if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                    nft.add_debt_event(DebtEvent::LoanabilityReset {
+                        tx_id: *tx_id,
+                        from: *seller,
+                        to: *buyer,
+                        previous_loanability: previous,
+                        new_loanability,
+                        height,
+                    });
+                    nft.deposit_loanability = new_loanability;
+                    nft.total_minted_from_nft = new_loanability;
+                    nft.loan_count = 0;
+                    nft.update_value_factor();
+                }
+            }
+
+            // Set owner
+            if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                nft.owner = *buyer;
+            }
+
+            // Bounty creation
+            let has_unreleased = ledger.nfts.get(nft_id).map(|n| n.affected_loans.iter().any(|al| !al.released)).unwrap_or(false);
+            let remaining_debt_positive = ledger.nfts.get(nft_id).map(|n| n.debt_balance.0 > 0).unwrap_or(false);
+            if has_unreleased && remaining_debt_positive {
+                let (source_nft_id, reward_wallet, currency_id, remaining_debt, loan_count, consistency_score, avg_interest) = {
+                    let nft = ledger.nfts.get(nft_id).unwrap();
+                    let loan_count = nft.affected_loans.iter().filter(|al| !al.released).count() as u32;
+                    let repaid = nft.affected_loans.iter().filter(|al| al.paid_at_start.0 > 0).count() as f64;
+                    let loan_total = nft.affected_loans.len() as f64;
+                    let consistency_score = if loan_total > 0.0 { repaid / loan_total } else { 1.0 };
+                    let avg_interest = if nft.affected_loans.is_empty() {
+                        Amount(0)
+                    } else {
+                        let sum: u128 = nft.affected_loans.iter().map(|al| {
+                            (al.original_obligation.0 * (nft.interest_rate_bps as u128)) / 10000
+                        }).sum();
+                        Amount(sum / (nft.affected_loans.len() as u128))
+                    };
+                    (nft.id, nft.depositor, nft.loaned_currency_id, nft.debt_balance, loan_count, consistency_score, avg_interest)
+                };
+                let base_blocks: u64 = 100;
+                let discount: u64 = (consistency_score * 50.0) as u64;
+                let time_limit = base_blocks.saturating_sub(discount).max(5);
+                let bounty_id = pasion_types::BountyId(blake3::hash(&[tx_id.0.as_slice(), nft_id.0.as_slice()].concat()).into());
+                let bounty = pasion_debt_nft::Bounty {
+                    id: bounty_id,
+                    source_nft_id,
+                    reward_wallet,
+                    currency_id,
+                    original_amount: remaining_debt,
+                    current_amount: remaining_debt,
+                    created_at_height: height,
+                    time_limit_blocks: time_limit,
+                    end_height: BlockHeight(height.0 + time_limit),
+                    loan_count,
+                    consistency_score,
+                    avg_interest,
+                    burn_remaining: Amount(0),
+                    burn_per_block: avg_interest,
+                    winner: None,
+                    winning_bid: None,
+                    status: pasion_debt_nft::BountyStatus::Open,
+                };
+                let auction = pasion_debt_nft::BountyAuction {
+                    bounty_id,
+                    bids: Vec::new(),
+                    highest: None,
+                    end_height: BlockHeight(height.0 + time_limit),
+                };
+                ledger.bounties.insert(bounty_id, bounty);
+                ledger.bounty_auctions.insert(bounty_id, auction);
+            }
+
+            // Record events
+            if let Some(nft) = ledger.nfts.get_mut(nft_id) {
+                nft.add_debt_event(DebtEvent::Transferred { from: *seller, to: *buyer, height });
+                nft.add_debt_event(DebtEvent::StarterSaleCompleted {
+                    tx_id: *tx_id,
+                    seller: *seller,
+                    buyer: *buyer,
+                    unpaid_debt,
+                    payment_amount: payment_total,
+                    height,
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub fn execute_arb_borrow(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> Result<()> {
         if let Transaction::ArbBorrow { tx_id: _, arbitrageur, debt_nft_id, pool_id } = tx {
             if !ledger.nfts.contains_key(debt_nft_id) {
@@ -976,6 +1224,6 @@ pub fn execute_yield_split_freeze(ledger: &mut SharedReplicatedLedger, tx: &Tran
 pub fn execute_set_minimum_yield_splitters(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> pasion_types::Result<()> {
     Executor::execute_set_minimum_yield_splitters(ledger, tx)
 }
-pub fn execute_yield_split_vote(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> pasion_types::Result<()> {
-    Executor::execute_yield_split_vote(ledger, tx)
+pub fn execute_nft_starter_sale(ledger: &mut SharedReplicatedLedger, tx: &Transaction) -> pasion_types::Result<()> {
+    Executor::execute_nft_starter_sale(ledger, tx)
 }
