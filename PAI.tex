@@ -30,7 +30,7 @@ PAI is a debt-native blockchain protocol that introduces a novel lending primiti
 \section{Introduction}
 Traditional blockchain systems lack native primitives for debt creation, enforcement, and liquidation in a unified manner. PAI addresses this gap by treating debt as a first-class primitive embedded at the protocol level. Rather than relying solely on smart contracts for lending logic, PAI encodes debt obligations, value mechanics, and liquidation paths directly into the protocol state machine.
 
-The protocol introduces several innovations: (1) deposit-derived debt instruments with immutable history, (2) a custom consensus model combining pairwise production with committee attestation, (3) block-relevant validation that maintains security while limiting computational scope, (4) strict transfer mechanics requiring full debt settlement in a single transaction, (5) automatic liquidation escalation through pools to arbitrageurs, and (6) a ratio-based value factor mechanism, and (7) a bounty lifecycle that auctions withdrawn value when loans remain unpaid, and (8) yield splitting that rewards borrowers who fully repay with no prior repayments by diverting a portion of depositor interest to them as PAI, with recurring distributions and depositor-governed freeze/vote controls.
+The protocol introduces several innovations: (1) deposit-derived debt instruments with immutable history, (2) a custom consensus model combining pairwise production with committee attestation, (3) block-relevant validation that maintains security while limiting computational scope, (4) strict transfer mechanics requiring full debt settlement in a single transaction, (5) automatic liquidation escalation through pools to arbitrageurs, and (6) a ratio-based value factor mechanism, and (7) a bounty lifecycle that auctions withdrawn value when loans remain unpaid, and (8) yield splitting that rewards borrowers who fully repay with no prior repayments by diverting a portion of depositor interest to them as PAI, with recurring distributions and depositor-governed freeze/vote controls, and (9) the ability to deposit into an existing debt instrument to augment its collateral without minting a new instrument.
 
 \section{System Overview}
 PAI operates as a distributed system where network participants maintain identical copies of a shared replicated immutable ledger. All state transitions are append-only and fully auditable through immutable history records. The protocol enforces economic invariants at the consensus and execution layers, ensuring that debt obligations cannot be circumvented and that failed settlements trigger predetermined consequences.
@@ -166,6 +166,19 @@ The loanable portion is computed from the deposit and the instrument's current l
 \text{loanable} = \text{deposit\_amount} \cdot \frac{\text{loanable\_pct}}{100}
 \end{equation}
 This value is stored both as \texttt{total\_minted\_from\_nft} (the denominator used by the value factor) and as \texttt{deposit\_loanability}. At deposit time \texttt{loan\_count} is zero, so the initial loanability is $70\%$ of the deposit.
+
+\subsection{Depositing into an Existing Instrument}
+A deposit transaction may optionally target an already-existing debt instrument. When a target is supplied, no new instrument is minted; instead, the deposit is added to the targeted instrument, increasing its collateral backing, loanable capacity, interest pool, and available collateral backing in place. When no target is supplied, the protocol creates a new instrument exactly as described above, preserving existing behavior.
+
+Targeted deposits are subject to the following validity conditions:
+\begin{itemize}
+\item The target instrument must exist.
+\item The target instrument must not be frozen or burned.
+\item The depositor of the transaction must equal the depositor recorded on the target instrument.
+\item The deposited asset must equal the collateral asset of the target instrument.
+\end{itemize}
+
+For a targeted deposit, the incremental loanable portion is computed using the target instrument's current loan count, so instruments that have already been used for lending accrue additional loanability at the reduced rate. The instrument's identity, owner, depositor, interest rate, and creation height remain unchanged; only the deposit-derived amounts, event history, and value factor are updated. The target instrument is included in the block-relevant state for the transaction, ensuring validators and producers reference the affected instrument during attestation.
 
 \subsection{Debt Instruments}
 Each deposit generates a unique debt instrument with the following properties:
