@@ -21,7 +21,7 @@
 \maketitle
 
 \begin{abstract}
-PAI is a debt-native blockchain protocol that introduces a novel lending primitive built around non-transferable-in-default debt instruments. The protocol enables deposits of external assets to create debt-tracked instruments, generates loanable currencies derived from those deposits, and enforces strict debt obligations through immutable records. A custom consensus mechanism called \textit{Custom Attested Bundle} coordinates block production through sealed-bid auctions between paired producers and a rotating reputation-weighted committee. The system employs block-relevant validation against a shared replicated ledger, enforces one-transaction full debt settlement on instrument transfers with automatic burning on failure, and implements liquidation through pools with arbitrage mechanisms. The native currency PAI has a dynamic supply with fee burning and rewards distributed to network participants. The protocol further introduces a bounty lifecycle: when a depositor withdraws before unpaid loans are settled, a bounty is created from the withdrawn value and auctioned on-chain, with settlement to the highest bidder or, absent bids, proportional distribution and timed burning. In addition, when a borrower fully repays a debt instrument with no prior repayments, that borrower becomes a yield splitter: a portion of the interest that would otherwise accrue to depositors is converted one-to-one to PAI and accrued as splitter earnings, and every six repayments each splitter distributes ten percent of accrued earnings to the original depositor while receiving taker-score units. Depositors may freeze an instrument to govern the minimum splitter count and yield splitters vote on the split percentage before the instrument unfreezes. This paper presents the complete system design, economic mechanisms, and security considerations.
+PAI is a debt-native blockchain protocol that introduces a novel lending primitive built around non-transferable-in-default debt instruments. The protocol enables deposits of external assets to create debt-tracked instruments, generates loanable currencies derived from those deposits, and enforces strict debt obligations through immutable records. A custom consensus mechanism called \textit{Custom Attested Bundle} coordinates block production through sealed-bid auctions between paired producers and a rotating reputation-weighted committee. The system employs block-relevant validation against a shared replicated ledger, enforces one-transaction full debt settlement on instrument transfers with automatic burning on failure, and implements liquidation through pools with arbitrage mechanisms. The native currency PAI has a dynamic supply with fee burning and rewards distributed to network participants. The protocol further introduces a bounty lifecycle: when a depositor withdraws before unpaid loans are settled, a bounty is created from the withdrawn value and auctioned on-chain, with settlement to the highest bidder or, absent bids, proportional distribution and timed burning. In addition, when a borrower fully repays a debt instrument either with no prior repayments or through a consistent payment schedule of equal amounts at equal time intervals, that borrower becomes a yield splitter: a portion of the interest that would otherwise accrue to depositors is converted one-to-one to PAI and accrued as splitter earnings, and every six repayments each splitter distributes ten percent of accrued earnings to the original depositor while receiving taker-score units. Depositors may freeze an instrument to govern the minimum splitter count and yield splitters vote on the split percentage before the instrument unfreezes. This paper presents the complete system design, economic mechanisms, and security considerations.
 \end{abstract}
 
 \tableofcontents
@@ -30,7 +30,7 @@ PAI is a debt-native blockchain protocol that introduces a novel lending primiti
 \section{Introduction}
 Traditional blockchain systems lack native primitives for debt creation, enforcement, and liquidation in a unified manner. PAI addresses this gap by treating debt as a first-class primitive embedded at the protocol level. Rather than relying solely on smart contracts for lending logic, PAI encodes debt obligations, value mechanics, and liquidation paths directly into the protocol state machine.
 
-The protocol introduces several innovations: (1) deposit-derived debt instruments with immutable history, (2) a custom consensus model combining pairwise production with committee attestation, (3) block-relevant validation that maintains security while limiting computational scope, (4) strict transfer mechanics requiring full debt settlement in a single transaction, (5) automatic liquidation escalation through pools to arbitrageurs, and (6) a ratio-based value factor mechanism, and (7) a bounty lifecycle that auctions withdrawn value when loans remain unpaid, and (8) yield splitting that rewards borrowers who fully repay with no prior repayments by diverting a portion of depositor interest to them as PAI, with recurring distributions and depositor-governed freeze/vote controls, and (9) the ability to deposit into an existing debt instrument to augment its collateral without minting a new instrument.
+The protocol introduces several innovations: (1) deposit-derived debt instruments with immutable history, (2) a custom consensus model combining pairwise production with committee attestation, (3) block-relevant validation that maintains security while limiting computational scope, (4) strict transfer mechanics requiring full debt settlement in a single transaction, (5) automatic liquidation escalation through pools to arbitrageurs, and (6) a ratio-based value factor mechanism, and (7) a bounty lifecycle that auctions withdrawn value when loans remain unpaid, and (8) yield splitting that rewards borrowers who fully repay either with no prior repayments or through a consistent payment schedule of equal amounts at equal time intervals by diverting a portion of depositor interest to them as PAI, with recurring distributions and depositor-governed freeze/vote controls, and (9) the ability to deposit into an existing debt instrument to augment its collateral without minting a new instrument.
 
 \section{System Overview}
 PAI operates as a distributed system where network participants maintain identical copies of a shared replicated immutable ledger. All state transitions are append-only and fully auditable through immutable history records. The protocol enforces economic invariants at the consensus and execution layers, ensuring that debt obligations cannot be circumvented and that failed settlements trigger predetermined consequences.
@@ -319,9 +319,10 @@ When a transfer succeeds and ownership actually changes (\texttt{from} $\neq$ \t
 \item \texttt{deposit\_loanability} is reset to $\text{deposit\_amount} \cdot 70 / 100$.
 \item \texttt{total\_minted\_from\_nft} is set to the new \texttt{deposit\_loanability}.
 \item \texttt{loan\_count} is reset to $0$.
+\item \texttt{repayment\_records} is cleared, matching the \texttt{loan\_count} reset.
 \item \texttt{update\_value\_factor()} recomputes the value factor from the new denominator.
 \end{enumerate}
-A \texttt{LoanabilityReset} event is appended to the instrument's immutable \texttt{debt\_history}, recording the transaction id, previous owner, new owner, previous loanability, new loanability, and block height. The reset preserves \texttt{available\_collateral\_backing}, \texttt{deposit\_amount}, and repayment history. No reset occurs for self-transfers (\texttt{from} = \texttt{to}), for transfers with unpaid debt (the instrument is burned), or for already-burned instruments.
+A \texttt{LoanabilityReset} event is appended to the instrument's immutable \texttt{debt\_history}, recording the transaction id, previous owner, new owner, previous loanability, new loanability, and block height. The reset preserves \texttt{available\_collateral\_backing} and \texttt{deposit\_amount}. Repayment metadata is cleared, so yield-splitter qualification history does not carry across owners. No reset occurs for self-transfers (\texttt{from} = \texttt{to}), for transfers with unpaid debt (the instrument is burned), or for already-burned instruments.
 
 \subsection{Burning Mechanism}
 Burning is permanent and irreversible. When triggered:
@@ -439,7 +440,7 @@ If unpaid affected loans remain after withdrawal, a bounty is created from the w
 \end{figure}
 
 \subsection{Overview}
-When a borrower fully repays a debt instrument with no prior repayments on that instrument, the borrower becomes a \textit{yield splitter} for the instrument. Yield splitting diverts a portion of the interest that would otherwise accrue to depositors to the splitter, converted one-to-one to PAI, and accrues it as splitter earnings. The mechanism rewards disciplined full repayment while preserving depositor returns through a governed, recurring distribution. Yield splitting is tracked immutably on the instrument through dedicated debt events.
+When a borrower fully repays a debt instrument either with no prior repayments on that instrument or through a consistent payment schedule of equal amounts at equal time intervals, the borrower becomes a \textit{yield splitter} for the instrument. Yield splitting diverts a portion of the interest that would otherwise accrue to depositors to the splitter, converted one-to-one to PAI, and accrues it as splitter earnings. The mechanism rewards disciplined full repayment while preserving depositor returns through a governed, recurring distribution. Yield splitting is tracked immutably on the instrument through dedicated debt events.
 
 \subsection{Qualifying Repayment}
 A repayment qualifies when all of the following hold before the repayment is applied:
@@ -447,9 +448,13 @@ A repayment qualifies when all of the following hold before the repayment is app
 \item The instrument exists and is not burned, paid off, or frozen.
 \item The outstanding debt before repayment is strictly greater than zero.
 \item The repayment amount is at least the outstanding debt before repayment.
-\item The instrument's repayment count is zero.
 \end{itemize}
-The no-prior-repayment condition ensures that only the first full repayment on an instrument creates a yield splitter; subsequent repayments by the same or other borrowers do not re-qualify.
+In addition, one of two qualification paths must hold:
+\begin{itemize}
+\item \textbf{No-prior-repayment path:} the instrument's repayment count is zero. This covers a single full repayment with no prior repayments.
+\item \textbf{Consistent-repayment path:} the instrument has at least one recorded prior repayment and all recorded repayments (including the current one) were made by the same borrower, all repayment amounts are equal, and all time intervals between consecutive repayment heights are equal. Intervals may be zero, so same-block consistent payments qualify. At least two total repayments are required.
+\end{itemize}
+The no-prior-repayment path is unchanged; the consistent path extends qualification to borrowers who fully repay through a disciplined, equal-amount, equal-interval schedule. Mixed borrowers, unequal amounts, or unequal intervals do not qualify.
 
 \subsection{Yield Splitter Addition and Initial PAI Payment}
 On a qualifying repayment:
@@ -503,6 +508,7 @@ The instrument gains the following fields, all with default values for backward 
 \item \texttt{yield\_split\_percentage\_bps}: split percentage in basis points (default $1000$).
 \item \texttt{yield\_votes}: mapping from voter to proposed percentage.
 \item \texttt{yield\_splitter\_pending}: mapping from splitter to accrued earnings.
+\item \texttt{repayment\_records}: list of per-repayment records (borrower, amount, height) used to evaluate consistent repayment history (default empty).
 \end{itemize}
 The instrument also exposes \texttt{is\_yield\_splitter(address)}.
 
