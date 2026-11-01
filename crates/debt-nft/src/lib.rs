@@ -16,6 +16,13 @@ pub struct LoanRef {
     pub loaner: Address,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RepaymentRecord {
+    pub borrower: Address,
+    pub amount: Amount,
+    pub height: BlockHeight,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WithdrawalStatus {
     Pending,
@@ -278,6 +285,8 @@ pub struct DebtNft {
     pub cumulative_repaid: Amount,
     pub loan_count: u32,
     #[serde(default)]
+    pub repayment_records: Vec<RepaymentRecord>,
+    #[serde(default)]
     pub yield_splitters: Vec<Address>,
     #[serde(default = "default_minimum_yield_splitter_users")]
     pub minimum_yield_splitter_users: u32,
@@ -331,6 +340,7 @@ impl DebtNft {
             repayment_count: 0,
             cumulative_repaid: Amount(0),
             loan_count: 0,
+            repayment_records: Vec::new(),
             yield_splitters: Vec::new(),
             minimum_yield_splitter_users: 6,
             frozen: false,
@@ -352,6 +362,37 @@ impl DebtNft {
 
     pub fn is_yield_splitter(&self, addr: &Address) -> bool {
         self.yield_splitters.contains(addr)
+    }
+
+    pub fn consistent_repayment_history(
+        &self,
+        borrower: &Address,
+        amount: Amount,
+        height: BlockHeight,
+    ) -> bool {
+        if self.repayment_records.is_empty() {
+            return false;
+        }
+        if self.repayment_records.iter().any(|r| r.borrower != *borrower) {
+            return false;
+        }
+        let mut amounts: Vec<Amount> = self.repayment_records.iter().map(|r| r.amount).collect();
+        amounts.push(amount);
+        if amounts.iter().any(|a| *a != amount) {
+            return false;
+        }
+        let mut heights: Vec<u64> = self.repayment_records.iter().map(|r| r.height.0).collect();
+        heights.push(height.0);
+        if heights.len() < 2 {
+            return false;
+        }
+        let interval = heights[1] as i64 - heights[0] as i64;
+        for i in 1..heights.len() - 1 {
+            if heights[i + 1] as i64 - heights[i] as i64 != interval {
+                return false;
+            }
+        }
+        true
     }
     
     pub fn update_value_factor(&mut self) {

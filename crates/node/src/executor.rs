@@ -1,6 +1,6 @@
 use pasion_types::{Result, PasionError};
 use pasion_ledger::{SharedReplicatedLedger, Transaction};
-use pasion_debt_nft::{DebtNft, DebtEvent, NftStatus, WithdrawalRecord, WithdrawalStatus, LoanRef, TrackedFund, TrackedFundStatus, ObligationStatus, LossEvent};
+use pasion_debt_nft::{DebtNft, DebtEvent, NftStatus, WithdrawalRecord, WithdrawalStatus, LoanRef, TrackedFund, TrackedFundStatus, ObligationStatus, LossEvent, RepaymentRecord};
 use pasion_types::{NftId, Amount, BlockHeight, Address, AssetId, TxId, BountyId};
 
 pub struct Executor;
@@ -121,6 +121,7 @@ impl Executor {
                     nft.deposit_loanability = new_loanability;
                     nft.total_minted_from_nft = new_loanability;
                     nft.loan_count = 0;
+                    nft.repayment_records.clear();
                     nft.update_value_factor();
                 }
                 nft.owner = *to;
@@ -160,6 +161,10 @@ impl Executor {
                 let incremental = nft.repayment_count > 0;
                 let was_full_no_prior = nft.repayment_count == 0 && debt_before > 0 && is_full;
                 let height = BlockHeight(ledger.blocks.len() as u64);
+                let was_consistent_full = !was_full_no_prior
+                    && is_full
+                    && debt_before > 0
+                    && nft.consistent_repayment_history(borrower, *amount, height);
                 if is_full {
                     let boost = if incremental { loaned_amount.0 / 10 } else { loaned_amount.0 };
                     nft.available_collateral_backing.0 += boost;
@@ -167,7 +172,7 @@ impl Executor {
                 } else {
                     nft.available_collateral_backing.0 += amount.0 / 2;
                 }
-                if was_full_no_prior {
+                if was_full_no_prior || was_consistent_full {
                     if !nft.yield_splitters.contains(borrower) {
                         nft.yield_splitters.push(*borrower);
                         nft.add_debt_event(DebtEvent::YieldSplitterAdded { tx_id: *tx_id, splitter: *borrower, height });
@@ -182,6 +187,11 @@ impl Executor {
                 }
                 nft.debt_balance.0 = nft.debt_balance.0.saturating_sub(amount.0);
                 nft.cumulative_repaid.0 += amount.0;
+                nft.repayment_records.push(RepaymentRecord {
+                    borrower: *borrower,
+                    amount: *amount,
+                    height,
+                });
                 nft.repayment_count += 1;
                 if nft.repayment_count % YIELD_SPLIT_RECURRING_INTERVAL == 0 && nft.yield_split_established {
                     let splitters = nft.yield_splitters.clone();
@@ -830,6 +840,7 @@ impl Executor {
                     nft.deposit_loanability = new_loanability;
                     nft.total_minted_from_nft = new_loanability;
                     nft.loan_count = 0;
+                    nft.repayment_records.clear();
                     nft.update_value_factor();
                 }
             }
