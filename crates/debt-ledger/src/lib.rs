@@ -239,6 +239,13 @@ pub enum DebtEvent {
     YieldSplitEstablished { tx_id: TxId, percentage_bps: u32, height: BlockHeight },
     YieldSplitPaid { tx_id: TxId, splitter: Address, amount: Amount, height: BlockHeight },
     YieldSplitDistribution { tx_id: TxId, depositor: Address, amount: Amount, height: BlockHeight },
+    StarterInterestPaid {
+        tx_id: TxId,
+        starter: Address,
+        amount: Amount,
+        currency_id: AssetId,
+        height: BlockHeight,
+    },
     StarterSaleDenied {
         tx_id: TxId,
         seller: Address,

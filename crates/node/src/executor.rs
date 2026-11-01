@@ -141,6 +141,7 @@ impl Executor {
             let mut taker_delta: i64 = 0;
             let mut do_taker_score = false;
             let mut pai_yield_credits: Vec<(Address, u128)> = Vec::new();
+            let mut starter_interest_credits: Vec<(Address, u128, AssetId)> = Vec::new();
             let mut recurring_transfers: Vec<(Address, Address, u128)> = Vec::new();
             let mut recurring_taker_scores: Vec<Address> = Vec::new();
             if let Some(nft) = ledger.ledgers.get_mut(ledger_id) {
@@ -184,6 +185,14 @@ impl Executor {
                     entry.0 += split_amount;
                     nft.deposit_interest_accrued.0 = nft.deposit_interest_accrued.0.saturating_sub(split_amount);
                     nft.add_debt_event(DebtEvent::YieldSplitPaid { tx_id: *tx_id, splitter: *borrower, amount: Amount(split_amount), height });
+                    let withdrawn = nft.withdrawal_executed;
+                    let starter = nft.owner;
+                    let currency = nft.loaned_currency_id;
+                    let starter_share = interest.0.saturating_sub(split_amount);
+                    if withdrawn && starter_share > 0 {
+                        nft.add_debt_event(DebtEvent::StarterInterestPaid { tx_id: *tx_id, starter, amount: Amount(starter_share), currency_id: currency, height });
+                        starter_interest_credits.push((starter, starter_share, currency));
+                    }
                 }
                 nft.debt_balance.0 = nft.debt_balance.0.saturating_sub(amount.0);
                 nft.cumulative_repaid.0 += amount.0;
@@ -238,6 +247,21 @@ impl Executor {
                             address: addr, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
                         });
                         acc.balances.entry(pai_id).and_modify(|e| e.0 += amt).or_insert(Amount(amt));
+                    }
+                }
+            }
+            // apply starter interest credits
+            for (starter, amt, currency) in starter_interest_credits {
+                if amt > 0 {
+                    {
+                        let entry = ledger.assets.entry(currency).or_insert(Amount(0));
+                        entry.0 = entry.0.saturating_add(amt);
+                    }
+                    {
+                        let acc = ledger.state.entry(starter).or_insert_with(|| pasion_ledger::AccountState {
+                            address: starter, balances: std::collections::HashMap::new(), nonce: 0, bond: Amount(0), bonded_role: None,
+                        });
+                        acc.balances.entry(currency).and_modify(|e| e.0 += amt).or_insert(Amount(amt));
                     }
                 }
             }
