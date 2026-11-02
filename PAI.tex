@@ -470,6 +470,9 @@ On a qualifying repayment:
 \end{enumerate}
 The repayment itself still applies the existing full-payoff value boost, cumulative repayment tracking, repayment count increment, and taker-score bonus. The split is therefore additive to, not a replacement for, the existing full-repayment rewards.
 
+\subsection{Starter Interest After Depositor Withdrawal}
+When a depositor has already withdrawn from an instrument (\texttt{withdrawal\_executed} is true), the portion of repayment interest that would otherwise remain for the withdrawn depositor is no longer left idle. On a qualifying repayment, after the yield-splitter PAI credit $S$ and the reduction of \texttt{deposit\_interest\_accrued}, the non-split depositor share $I - S$ (saturating at zero) is credited one-to-one to the instrument's current owner (the starter, which may have changed via ledger transfer or starter sale) in the instrument's starting currency (\texttt{loaned\_currency\_id}). Both PAI supply and the starter's account balance are increased by this amount, and a \texttt{StarterInterestPaid} event is recorded with the starter, amount, and currency. If \texttt{withdrawal\_executed} is false, or the non-split share is zero (for example when the split percentage is $10000$ bps), no credit or event occurs. All existing repayment, boost, taker-score, and recurring-distribution behavior is preserved.
+
 \subsection{Recurring Distribution}
 After the repayment count is incremented, if the new count is a multiple of six and yield splitting has been established, a recurring distribution occurs. For each splitter in \texttt{yield\_splitters}:
 \begin{enumerate}
@@ -512,7 +515,7 @@ The instrument gains the following fields, all with default values for backward 
 \end{itemize}
 The instrument also exposes \texttt{is\_yield\_splitter(address)}.
 
-New debt events: \texttt{YieldSplitterAdded}, \texttt{YieldSplitFrozen}, \texttt{MinimumYieldSplittersSet}, \texttt{YieldSplitPercentageVoted}, \texttt{YieldSplitEstablished}, \texttt{YieldSplitPaid}, and \texttt{YieldSplitDistribution}.
+New debt events: \texttt{YieldSplitterAdded}, \texttt{YieldSplitFrozen}, \texttt{MinimumYieldSplittersSet}, \texttt{YieldSplitPercentageVoted}, \texttt{YieldSplitEstablished}, \texttt{YieldSplitPaid}, \texttt{YieldSplitDistribution}, and \texttt{StarterInterestPaid}.
 
 New transactions: \texttt{YieldSplitFreeze}, \texttt{SetMinimumYieldSplitters}, and \texttt{YieldSplitVote}. Block-relevant state construction touches the depositor or voter account and the instrument for each. A new error, \texttt{LedgerFrozen}, signals that an operation was rejected because the instrument is frozen.
 
