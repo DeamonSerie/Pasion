@@ -155,6 +155,10 @@ pub enum DebtEvent {
         currency_id: AssetId,
         height: BlockHeight,
     },
+    LoanMatured {
+        tx_id: TxId,
+        height: BlockHeight,
+    },
     Repayment {
         tx_id: TxId,
         amount: Amount,
@@ -307,6 +311,10 @@ pub struct DebtLedger {
     pub yield_votes: std::collections::HashMap<Address, u32>,
     #[serde(default)]
     pub yield_splitter_pending: std::collections::HashMap<Address, Amount>,
+    #[serde(default)]
+    pub loans: Vec<pasion_lending::Loan>,
+    #[serde(default)]
+    pub matured: bool,
 }
 
 impl DebtLedger {
@@ -355,6 +363,8 @@ impl DebtLedger {
             yield_split_percentage_bps: 1000,
             yield_votes: std::collections::HashMap::new(),
             yield_splitter_pending: std::collections::HashMap::new(),
+            loans: Vec::new(),
+            matured: false,
         }
     }
     

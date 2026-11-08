@@ -4247,6 +4247,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "pasion-core",
+ "pasion-lending",
  "pasion-types",
  "serde",
  "thiserror 1.0.69",
@@ -4311,6 +4312,7 @@ dependencies = [
  "pasion-core",
  "pasion-debt-ledger",
  "pasion-ledger",
+ "pasion-lending",
  "pasion-liquidation",
  "pasion-network",
  "pasion-rpc",

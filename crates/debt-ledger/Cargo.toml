@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 pasion-types = { path = "../types" }
 pasion-core = { path = "../core" }
+pasion-lending = { path = "../lending" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
